@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --color-charcoal-950: #0a0a0a;
+  --color-charcoal-900: #141414;
+  --color-charcoal-800: #1a1a1a;
+  --color-charcoal-700: #1e1e1e;
+  --color-charcoal-600: #262626;
+  --color-charcoal-500: #333333;
+  --color-charcoal-400: #444444;
+  --color-charcoal-300: #666666;
+  --color-rpm-red: #dc2626;
+  --color-rpm-red-dark: #b91c1c;
+  --color-rpm-gold: #d97706;
+  --color-rpm-gold-light: #f59e0b;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #0a0a0a;
+  color: #e5e5e5;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #141414;
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+
+/* Typing indicator animation */
+@keyframes typingDot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+
+.typing-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #999;
+  margin: 0 2px;
+  animation: typingDot 1.4s infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
