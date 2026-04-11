@@ -1,0 +1,15 @@
+.claude/
+.git/
+.next/
+.vite/
+.pytest_cache/
+__pycache__/
+node_modules/
+archive/
+magi/
+openwork/
+.env
+.env.local
+.env.*.local
+*.db
+*.sqlite3

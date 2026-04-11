@@ -1,16 +1,28 @@
 import json
+import os
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from mcp_servers.ghl.client import GHLAPIError, GHLClient
 
+KB_DIR = Path(__file__).parent / "knowledge_base"
+
 mcp = FastMCP(
     "GoHighLevel CRM",
     instructions="MCP server for GoHighLevel CRM - contacts, conversations, pipelines, opportunities, calendars, tasks, notes, and team management for Mikalyzed Auto Boutique. NOTE: Some write scopes are not yet enabled on the PIT token. If a tool returns a 403 with a required_scope hint, silently note it and move on — do NOT repeatedly warn the user or suggest they enable scopes. They already know and will enable them when ready.",
 )
-client = GHLClient()
+_client: GHLClient | None = None
+
+
+def get_client() -> GHLClient:
+    global _client
+    if _client is None:
+        _client = GHLClient()
+    return _client
 
 VALID_OPPORTUNITY_STATUSES = {"open", "won", "lost", "abandoned", "all"}
 VALID_WRITE_OPPORTUNITY_STATUSES = VALID_OPPORTUNITY_STATUSES - {"all"}
@@ -113,7 +125,7 @@ async def search_contacts(query: str = "", tag: str = "", limit: int = 20) -> st
         if tag:
             params["query"] = tag
 
-        data = await client.get("/contacts/", params)
+        data = await get_client().get("/contacts/", params)
         contacts = []
         for contact in data.get("contacts", []):
             contacts.append(
@@ -146,7 +158,7 @@ async def get_contact(contact_id: str) -> str:
         contact_id: The GHL contact ID returned by search_contacts.
     """
     try:
-        data = await client.get(f"/contacts/{contact_id}")
+        data = await get_client().get(f"/contacts/{contact_id}")
         contact = data.get("contact", data)
         return _success(
             {
@@ -187,7 +199,7 @@ async def search_conversations(contact_id: str = "", limit: int = 20) -> str:
         if contact_id:
             params["contactId"] = contact_id
 
-        data = await client.get("/conversations/search", params)
+        data = await get_client().get("/conversations/search", params)
         conversations = []
         for conversation in data.get("conversations", []):
             conversations.append(
@@ -223,7 +235,7 @@ async def get_conversation_messages(conversation_id: str) -> str:
         conversation_id: The GHL conversation ID returned by search_conversations.
     """
     try:
-        data = await client.get(f"/conversations/{conversation_id}/messages")
+        data = await get_client().get(f"/conversations/{conversation_id}/messages")
         raw_messages = data.get("messages", {}).get("messages", [])
         messages = []
         for message in reversed(raw_messages):
@@ -254,7 +266,7 @@ async def get_pipelines() -> str:
     Use this to look up valid pipeline and stage IDs before creating, searching, or updating opportunities.
     """
     try:
-        data = await client.get("/opportunities/pipelines")
+        data = await get_client().get("/opportunities/pipelines")
         pipelines = []
         for pipeline in data.get("pipelines", []):
             stages = []
@@ -302,7 +314,7 @@ async def search_opportunities(
         if contact_id:
             params["contactId"] = contact_id
 
-        data = await client.get("/opportunities/search", params)
+        data = await get_client().get("/opportunities/search", params)
         opportunities = [_serialize_opportunity_summary(opportunity) for opportunity in data.get("opportunities", [])]
         total = data.get("meta", {}).get("total", len(opportunities))
         return _success({"opportunities": opportunities, "total": total, "has_more": total > len(opportunities)})
@@ -322,7 +334,7 @@ async def get_opportunity(opportunity_id: str) -> str:
         opportunity_id: The GHL opportunity ID returned by search_opportunities or create_opportunity.
     """
     try:
-        data = await client.get(f"/opportunities/{opportunity_id}")
+        data = await get_client().get(f"/opportunities/{opportunity_id}")
         opportunity = data.get("opportunity", data)
         return _success({"opportunity": opportunity})
     except GHLAPIError as e:
@@ -336,7 +348,7 @@ async def list_calendars() -> str:
     Use this before booking an appointment to discover valid calendar IDs.
     """
     try:
-        data = await client.get("/calendars/")
+        data = await get_client().get("/calendars/")
         calendars = []
         for calendar in data.get("calendars", data.get("data", [])):
             calendars.append(
@@ -357,7 +369,7 @@ async def list_calendars() -> str:
 async def get_location() -> str:
     """Get the current sub-account (location) details configured for this MCP server."""
     try:
-        data = await client.get(f"/locations/{client.location_id}", params={})
+        data = await get_client().get(f"/locations/{get_client().location_id}", params={})
         location = data.get("location", data)
         return _success({"location": location})
     except GHLAPIError as e:
@@ -371,7 +383,7 @@ async def get_location_custom_fields() -> str:
     Use this when a workflow needs to discover which custom fields exist before reading or writing field values.
     """
     try:
-        data = await client.get(f"/locations/{client.location_id}/customFields", params={})
+        data = await get_client().get(f"/locations/{get_client().location_id}/customFields", params={})
         custom_fields = data.get("customFields", data.get("fields", data))
         return _success({"customFields": custom_fields})
     except GHLAPIError as e:
@@ -385,7 +397,7 @@ async def get_location_tags() -> str:
     Use this to discover valid tag names before adding or removing tags from contacts.
     """
     try:
-        data = await client.get(f"/locations/{client.location_id}/tags", params={})
+        data = await get_client().get(f"/locations/{get_client().location_id}/tags", params={})
         tags = data.get("tags", data.get("locationTags", data))
         return _success({"tags": tags})
     except GHLAPIError as e:
@@ -418,7 +430,7 @@ async def create_or_update_contact(
                 field="phone",
             )
 
-        body: dict[str, Any] = {"locationId": client.location_id}
+        body: dict[str, Any] = {"locationId": get_client().location_id}
         if first_name:
             body["firstName"] = first_name
         if last_name:
@@ -432,7 +444,7 @@ async def create_or_update_contact(
         if source:
             body["source"] = source
 
-        data = await client.post("/contacts/upsert", json=body)
+        data = await get_client().post("/contacts/upsert", json=body)
         return _success({"contact": data.get("contact", data)})
     except GHLAPIError as e:
         return _error(e, required_scope="contacts.write")
@@ -447,7 +459,7 @@ async def add_contact_tags(contact_id: str, tags: list[str]) -> str:
         tags: The tags to add to the contact.
     """
     try:
-        data = await client.post(f"/contacts/{contact_id}/tags", json={"tags": tags})
+        data = await get_client().post(f"/contacts/{contact_id}/tags", json={"tags": tags})
         return _success({"tags": data.get("tags", tags)})
     except GHLAPIError as e:
         return _error(e, required_scope="contacts.write")
@@ -462,7 +474,7 @@ async def remove_contact_tags(contact_id: str, tags: list[str]) -> str:
         tags: The tags to remove from the contact.
     """
     try:
-        data = await client.delete(f"/contacts/{contact_id}/tags", json={"tags": tags})
+        data = await get_client().delete(f"/contacts/{contact_id}/tags", json={"tags": tags})
         return _success({"tags": data.get("tags", tags)})
     except GHLAPIError as e:
         return _error(e, required_scope="contacts.write")
@@ -493,7 +505,7 @@ async def send_message(conversation_id: str, message_type: str, body: str, subje
         if message_type == "Email":
             payload["subject"] = subject
 
-        data = await client.post("/conversations/messages", json=payload)
+        data = await get_client().post("/conversations/messages", json=payload)
         return _success({"messageId": data.get("messageId"), "message": data})
     except ValueError as e:
         return _validation_error(str(e), field="message_type", allowed_values=sorted(VALID_MESSAGE_TYPES))
@@ -526,7 +538,7 @@ async def create_opportunity(
         _validate_opportunity_status(status, allow_all=False)
 
         body: dict[str, Any] = {
-            "locationId": client.location_id,
+            "locationId": get_client().location_id,
             "contactId": contact_id,
             "pipelineId": pipeline_id,
             "pipelineStageId": stage_id,
@@ -536,7 +548,7 @@ async def create_opportunity(
         if monetary_value is not None:
             body["monetaryValue"] = monetary_value
 
-        data = await client.post("/opportunities", json=body)
+        data = await get_client().post("/opportunities", json=body)
         opportunity = data.get("opportunity", data)
         return _success({"opportunity": opportunity})
     except ValueError as e:
@@ -580,7 +592,7 @@ async def update_opportunity(
         if title:
             body["name"] = title
 
-        data = await client.put(f"/opportunities/{opportunity_id}", json=body)
+        data = await get_client().put(f"/opportunities/{opportunity_id}", json=body)
         return _success({"opportunity": data})
     except ValueError as e:
         return _validation_error(str(e), field="status", allowed_values=sorted(VALID_WRITE_OPPORTUNITY_STATUSES))
@@ -615,7 +627,7 @@ async def book_appointment(
 
         body: dict[str, Any] = {
             "calendarId": calendar_id,
-            "locationId": client.location_id,
+            "locationId": get_client().location_id,
             "contactId": contact_id,
             "startTime": normalized_start,
             "endTime": normalized_end,
@@ -625,7 +637,7 @@ async def book_appointment(
         if notes:
             body["notes"] = notes
 
-        data = await client.post("/calendars/events/appointments", json=body)
+        data = await get_client().post("/calendars/events/appointments", json=body)
         return _success({"appointment": data})
     except ValueError as e:
         field = "end_time" if "end_time" in str(e) else "start_time"
@@ -696,7 +708,7 @@ async def update_contact(
         if not body:
             return _validation_error("At least one field must be provided to update.", field="contact_id")
 
-        data = await client.put(f"/contacts/{contact_id}", json=body)
+        data = await get_client().put(f"/contacts/{contact_id}", json=body)
         return _success({"contact": data.get("contact", data)})
     except GHLAPIError as e:
         return _error(e, required_scope="contacts.write")
@@ -710,7 +722,7 @@ async def delete_contact(contact_id: str) -> str:
         contact_id: The GHL contact ID to delete.
     """
     try:
-        data = await client.delete(f"/contacts/{contact_id}")
+        data = await get_client().delete(f"/contacts/{contact_id}")
         return _success({"deleted": True, "contactId": contact_id})
     except GHLAPIError as e:
         return _error(e, required_scope="contacts.write")
@@ -727,7 +739,7 @@ async def get_contact_notes(contact_id: str) -> str:
         contact_id: The GHL contact ID.
     """
     try:
-        data = await client.get(f"/contacts/{contact_id}/notes")
+        data = await get_client().get(f"/contacts/{contact_id}/notes")
         notes = data.get("notes", [])
         return _success({"notes": notes, "count": len(notes)})
     except GHLAPIError as e:
@@ -745,7 +757,7 @@ async def add_contact_note(contact_id: str, body: str) -> str:
     try:
         if not body.strip():
             return _validation_error("body cannot be empty", field="body")
-        data = await client.post(f"/contacts/{contact_id}/notes", json={"body": body})
+        data = await get_client().post(f"/contacts/{contact_id}/notes", json={"body": body})
         return _success({"note": data})
     except GHLAPIError as e:
         return _error(e, required_scope="contacts.write")
@@ -762,7 +774,7 @@ async def get_contact_tasks(contact_id: str) -> str:
         contact_id: The GHL contact ID.
     """
     try:
-        data = await client.get(f"/contacts/{contact_id}/tasks")
+        data = await get_client().get(f"/contacts/{contact_id}/tasks")
         tasks = data.get("tasks", [])
         return _success({"tasks": tasks, "count": len(tasks)})
     except GHLAPIError as e:
@@ -797,7 +809,7 @@ async def create_contact_task(
         if assigned_to:
             body["assignedTo"] = assigned_to
 
-        data = await client.post(f"/contacts/{contact_id}/tasks", json=body)
+        data = await get_client().post(f"/contacts/{contact_id}/tasks", json=body)
         return _success({"task": data})
     except ValueError as e:
         return _validation_error(str(e), field="due_date")
@@ -831,7 +843,7 @@ async def update_conversation(
         if not body:
             return _validation_error("At least one field must be provided: starred or unread_count.", field="conversation_id")
 
-        data = await client.put(f"/conversations/{conversation_id}", json=body)
+        data = await get_client().put(f"/conversations/{conversation_id}", json=body)
         return _success({"conversation": data})
     except GHLAPIError as e:
         return _error(e, required_scope="conversations.write")
@@ -878,7 +890,7 @@ async def get_calendar_events(
         if end_time:
             params["endTime"] = _parse_iso8601_datetime(end_time, field="end_time")
 
-        data = await client.get("/calendars/events", params)
+        data = await get_client().get("/calendars/events", params)
         events = data.get("events", data.get("data", []))
         return _success({"events": events, "count": len(events)})
     except ValueError as e:
@@ -910,7 +922,7 @@ async def get_calendar_free_slots(
             "timezone": timezone,
             "calendarId": calendar_id,
         }
-        data = await client.get(f"/calendars/{calendar_id}/free-slots", params)
+        data = await get_client().get(f"/calendars/{calendar_id}/free-slots", params)
         slots = data.get("slots", data.get("data", data))
         return _success({"slots": slots})
     except GHLAPIError as e:
@@ -957,7 +969,7 @@ async def update_appointment(
         if len(body) <= 1:
             return _validation_error("At least one field must be provided to update.", field="event_id")
 
-        data = await client.put(f"/calendars/events/appointments/{event_id}", json=body)
+        data = await get_client().put(f"/calendars/events/appointments/{event_id}", json=body)
         return _success({"appointment": data})
     except ValueError as e:
         field = "end_time" if "end_time" in str(e) else "start_time"
@@ -974,7 +986,7 @@ async def delete_appointment(event_id: str) -> str:
         event_id: The GHL event/appointment ID to delete.
     """
     try:
-        data = await client.delete(f"/calendars/events/appointments/{event_id}")
+        data = await get_client().delete(f"/calendars/events/appointments/{event_id}")
         return _success({"deleted": True, "eventId": event_id})
     except GHLAPIError as e:
         return _error(e, required_scope="calendars/events.write")
@@ -991,7 +1003,7 @@ async def delete_opportunity(opportunity_id: str) -> str:
         opportunity_id: The GHL opportunity ID to delete.
     """
     try:
-        data = await client.delete(f"/opportunities/{opportunity_id}")
+        data = await get_client().delete(f"/opportunities/{opportunity_id}")
         return _success({"deleted": True, "opportunityId": opportunity_id})
     except GHLAPIError as e:
         return _error(e, required_scope="opportunities.write")
@@ -1007,7 +1019,7 @@ async def get_users() -> str:
     Use this to look up user IDs for assigning contacts, tasks, or appointments.
     """
     try:
-        data = await client.get("/users/")
+        data = await get_client().get("/users/")
         users = []
         for user in data.get("users", []):
             users.append(
@@ -1034,10 +1046,148 @@ async def get_user(user_id: str) -> str:
         user_id: The GHL user ID.
     """
     try:
-        data = await client.get(f"/users/{user_id}")
+        data = await get_client().get(f"/users/{user_id}")
         return _success({"user": data})
     except GHLAPIError as e:
         return _error(e, required_scope="users.readonly")
+
+# ---------------------------------------------------------------------------
+# Knowledge Base tools
+# ---------------------------------------------------------------------------
+
+
+def _kb_slug(name: str) -> str:
+    """Turn a human name into a filename slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    if not slug:
+        raise ValueError("name must contain at least one alphanumeric character")
+    return slug
+
+
+def _kb_doc_to_dict(path: Path) -> dict[str, Any]:
+    """Read a KB markdown file into a dict with name, slug, and content."""
+    content = path.read_text(encoding="utf-8")
+    # Extract title from first H1 if present
+    title = path.stem.replace("-", " ").title()
+    for line in content.splitlines():
+        if line.startswith("# "):
+            title = line[2:].strip()
+            break
+    return {
+        "slug": path.stem,
+        "title": title,
+        "content": content,
+        "size_bytes": len(content.encode("utf-8")),
+    }
+
+
+@mcp.tool()
+async def kb_list() -> str:
+    """List all knowledge base documents.
+
+    Returns titles, slugs, and sizes of all docs in the dealership knowledge base.
+    Use slugs with kb_read to fetch full content.
+    """
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    docs = []
+    for path in sorted(KB_DIR.glob("*.md")):
+        doc = _kb_doc_to_dict(path)
+        docs.append({"slug": doc["slug"], "title": doc["title"], "size_bytes": doc["size_bytes"]})
+    return _success({"documents": docs, "count": len(docs)})
+
+
+@mcp.tool()
+async def kb_read(slug: str) -> str:
+    """Read a knowledge base document by its slug.
+
+    Args:
+        slug: The document slug from kb_list (e.g. "lead-qualification", "follow-up-practices").
+    """
+    path = KB_DIR / f"{slug}.md"
+    if not path.exists():
+        return _validation_error(f"Document '{slug}' not found. Use kb_list to see available documents.", field="slug")
+    doc = _kb_doc_to_dict(path)
+    return _success({"document": doc})
+
+
+@mcp.tool()
+async def kb_write(name: str, content: str) -> str:
+    """Create or update a knowledge base document.
+
+    Use this to capture dealership knowledge — sales practices, inventory notes,
+    customer personas, objection handling, or anything the team wants the agent to know.
+
+    Args:
+        name: Human-readable document name (e.g. "Classic Car Buyers"). Gets slugified for the filename.
+        content: Full markdown content for the document. Start with a # heading matching the name.
+    """
+    if not content.strip():
+        return _validation_error("content cannot be empty", field="content")
+    try:
+        slug = _kb_slug(name)
+    except ValueError as e:
+        return _validation_error(str(e), field="name")
+
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    path = KB_DIR / f"{slug}.md"
+    existed = path.exists()
+    path.write_text(content, encoding="utf-8")
+
+    doc = _kb_doc_to_dict(path)
+    return _success({
+        "document": doc,
+        "action": "updated" if existed else "created",
+    })
+
+
+@mcp.tool()
+async def kb_search(query: str) -> str:
+    """Search knowledge base documents by keyword.
+
+    Searches document titles and content for the query string. Case-insensitive.
+
+    Args:
+        query: Search term to find across all knowledge base documents.
+    """
+    if not query.strip():
+        return _validation_error("query cannot be empty", field="query")
+
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    query_lower = query.lower()
+    results = []
+    for path in sorted(KB_DIR.glob("*.md")):
+        doc = _kb_doc_to_dict(path)
+        full_text = doc["content"].lower()
+        if query_lower in full_text or query_lower in doc["title"].lower():
+            # Find matching lines for context
+            snippets = []
+            for line in doc["content"].splitlines():
+                if query_lower in line.lower() and line.strip():
+                    snippets.append(line.strip()[:200])
+                    if len(snippets) >= 3:
+                        break
+            results.append({
+                "slug": doc["slug"],
+                "title": doc["title"],
+                "snippets": snippets,
+            })
+
+    return _success({"results": results, "count": len(results), "query": query})
+
+
+@mcp.tool()
+async def kb_delete(slug: str) -> str:
+    """Delete a knowledge base document.
+
+    Args:
+        slug: The document slug from kb_list.
+    """
+    path = KB_DIR / f"{slug}.md"
+    if not path.exists():
+        return _validation_error(f"Document '{slug}' not found. Use kb_list to see available documents.", field="slug")
+    title = _kb_doc_to_dict(path)["title"]
+    path.unlink()
+    return _success({"deleted": slug, "title": title})
 
 
 if __name__ == "__main__":

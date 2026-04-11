@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RPM — Marcus",
+  title: "Jimmy - Marcus",
   description: "AI sales co-worker for your dealership",
 };
 

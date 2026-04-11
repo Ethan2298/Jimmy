@@ -5,7 +5,13 @@ export async function updateSession(request: NextRequest) {
   // Skip Supabase auth for magi routes
   if (
     request.nextUrl.pathname.startsWith("/magi") ||
-    request.nextUrl.pathname.startsWith("/api/magi")
+    request.nextUrl.pathname.startsWith("/api/magi") ||
+    request.nextUrl.pathname.startsWith("/api/mcp") ||
+    request.nextUrl.pathname.startsWith("/api/oauth") ||
+    request.nextUrl.pathname.startsWith("/oauth") ||
+    request.nextUrl.pathname === "/authorize" ||
+    request.nextUrl.pathname === "/token" ||
+    request.nextUrl.pathname.startsWith("/.well-known")
   ) {
     return NextResponse.next({ request });
   }

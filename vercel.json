@@ -1,3 +1,9 @@
 {
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "functions": {
+    "api/mcp.py": {
+      "runtime": "@vercel/python@6.29.0",
+      "maxDuration": 300
+    }
+  }
 }

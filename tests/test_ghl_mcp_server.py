@@ -393,7 +393,7 @@ def test_list_calendars_returns_simplified_shape(monkeypatch, server_module):
 def test_get_location_uses_shared_success_envelope(monkeypatch, server_module):
     async def fake_get(path, params=None):
         assert path == "/locations/test-location-id"
-        return {"location": {"id": "test-location-id", "name": "RPM Showroom"}}
+        return {"location": {"id": "test-location-id", "name": "Jimmy Showroom"}}
 
     monkeypatch.setattr(server_module.client, "get", fake_get)
 
@@ -401,7 +401,7 @@ def test_get_location_uses_shared_success_envelope(monkeypatch, server_module):
     data = get_data(result)
 
     assert data["location"]["id"] == "test-location-id"
-    assert data["location"]["name"] == "RPM Showroom"
+    assert data["location"]["name"] == "Jimmy Showroom"
 
 
 def test_get_location_custom_fields_uses_shared_success_envelope(monkeypatch, server_module):
@@ -551,3 +551,115 @@ def test_auth_errors_use_shared_error_envelope(monkeypatch, server_module):
             "resolution": "Enable the contacts.write scope on the GHL Private Integration token.",
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Base tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def kb_dir(tmp_path, server_module):
+    """Point KB_DIR to a temp directory for isolation."""
+    original = server_module.KB_DIR
+    server_module.KB_DIR = tmp_path
+    yield tmp_path
+    server_module.KB_DIR = original
+
+
+def test_kb_list_empty(server_module, kb_dir):
+    result = parse_json(asyncio.run(server_module.kb_list()))
+    data = get_data(result)
+    assert data["count"] == 0
+    assert data["documents"] == []
+
+
+def test_kb_write_creates_doc(server_module, kb_dir):
+    result = parse_json(asyncio.run(server_module.kb_write("Test Doc", "# Test Doc\n\nSome content.")))
+    data = get_data(result)
+    assert data["action"] == "created"
+    assert data["document"]["slug"] == "test-doc"
+    assert data["document"]["title"] == "Test Doc"
+    assert (kb_dir / "test-doc.md").exists()
+
+
+def test_kb_write_updates_existing(server_module, kb_dir):
+    asyncio.run(server_module.kb_write("Test Doc", "# Test Doc\n\nV1"))
+    result = parse_json(asyncio.run(server_module.kb_write("Test Doc", "# Test Doc\n\nV2")))
+    data = get_data(result)
+    assert data["action"] == "updated"
+    assert "V2" in data["document"]["content"]
+
+
+def test_kb_write_rejects_empty_content(server_module, kb_dir):
+    result = parse_json(asyncio.run(server_module.kb_write("Empty", "")))
+    error = get_error(result)
+    assert error["field"] == "content"
+
+
+def test_kb_read_returns_doc(server_module, kb_dir):
+    asyncio.run(server_module.kb_write("My Notes", "# My Notes\n\nHello world."))
+    result = parse_json(asyncio.run(server_module.kb_read("my-notes")))
+    data = get_data(result)
+    assert data["document"]["title"] == "My Notes"
+    assert "Hello world" in data["document"]["content"]
+
+
+def test_kb_read_missing_doc(server_module, kb_dir):
+    result = parse_json(asyncio.run(server_module.kb_read("nonexistent")))
+    error = get_error(result)
+    assert error["field"] == "slug"
+    assert "not found" in error["message"]
+
+
+def test_kb_search_finds_matches(server_module, kb_dir):
+    asyncio.run(server_module.kb_write("Sales Tips", "# Sales Tips\n\nAlways follow up within 5 minutes."))
+    asyncio.run(server_module.kb_write("Inventory", "# Inventory\n\nPorsche Cayenne in stock."))
+
+    result = parse_json(asyncio.run(server_module.kb_search("follow up")))
+    data = get_data(result)
+    assert data["count"] == 1
+    assert data["results"][0]["slug"] == "sales-tips"
+
+
+def test_kb_search_case_insensitive(server_module, kb_dir):
+    asyncio.run(server_module.kb_write("Guide", "# Guide\n\nPORSCHE buyers want white glove service."))
+    result = parse_json(asyncio.run(server_module.kb_search("porsche")))
+    data = get_data(result)
+    assert data["count"] == 1
+
+
+def test_kb_search_empty_query(server_module, kb_dir):
+    result = parse_json(asyncio.run(server_module.kb_search("")))
+    error = get_error(result)
+    assert error["field"] == "query"
+
+
+def test_kb_delete_removes_doc(server_module, kb_dir):
+    asyncio.run(server_module.kb_write("Temp", "# Temp\n\nDelete me."))
+    assert (kb_dir / "temp.md").exists()
+
+    result = parse_json(asyncio.run(server_module.kb_delete("temp")))
+    data = get_data(result)
+    assert data["deleted"] == "temp"
+    assert not (kb_dir / "temp.md").exists()
+
+
+def test_kb_delete_missing_doc(server_module, kb_dir):
+    result = parse_json(asyncio.run(server_module.kb_delete("ghost")))
+    error = get_error(result)
+    assert error["field"] == "slug"
+
+
+def test_kb_list_shows_all_docs(server_module, kb_dir):
+    asyncio.run(server_module.kb_write("Doc A", "# Doc A\n\nFirst."))
+    asyncio.run(server_module.kb_write("Doc B", "# Doc B\n\nSecond."))
+    asyncio.run(server_module.kb_write("Doc C", "# Doc C\n\nThird."))
+
+    result = parse_json(asyncio.run(server_module.kb_list()))
+    data = get_data(result)
+    assert data["count"] == 3
+    slugs = [d["slug"] for d in data["documents"]]
+    assert "doc-a" in slugs
+    assert "doc-b" in slugs
+    assert "doc-c" in slugs
