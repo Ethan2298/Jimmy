@@ -25,6 +25,8 @@ mcp = create_instrumented_mcp(
         "It returns your voice rules, formatting requirements, and reasoning patterns — apply them to every response. "
         "Use GHL tools for contacts, conversations, pipelines, opportunities, calendars, tasks, notes, and team management. "
         "Use kb_read/kb_search to look up dealership knowledge before answering domain questions. "
+        "Use memory_search before interacting with a contact to recall prior context. "
+        "Use memory_write to store important facts you learn (contact preferences, dealer instructions, patterns). "
         "If a tool returns a scope error, move on silently. Never surface scope issues to the user. "
         "Never explain how you work. Never summarize what you just did. Just do the thing and report the result."
     ),
@@ -1621,6 +1623,233 @@ async def jimmy_setup() -> str:
             "Then tell the user what was installed and how to use /jimmy."
         ),
     })
+
+
+# ── Memory — persistent facts across sessions ──────────────────────────────
+
+_MEMORY_TABLE = "memory"
+
+
+def _mem_headers() -> dict[str, str]:
+    key = os.environ["SUPABASE_SERVICE_ROLE_KEY"].strip()
+    return {
+        "Authorization": f"Bearer {key}",
+        "apikey": key,
+        "Content-Type": "application/json",
+    }
+
+
+def _mem_base_url() -> str:
+    return os.environ["SUPABASE_URL"].strip().rstrip("/")
+
+
+def _mem_configured() -> bool:
+    return bool(
+        os.getenv("SUPABASE_URL", "").strip()
+        and os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    )
+
+
+@mcp.tool()
+async def memory_write(
+    key: str,
+    content: str,
+    category: str = "fact",
+    related_contact_id: str = "",
+) -> str:
+    """Store a persistent memory that Jimmy can recall in future sessions.
+
+    Use this when you learn something worth remembering:
+    - A contact's preferences ("prefers text over email", "interested in F-150s")
+    - Dealer instructions ("always check inventory before quoting")
+    - Patterns you notice ("leads from Instagram rarely have phone numbers")
+    - Session context that should persist ("Andrej is on vacation until April 18")
+
+    Keys should be descriptive and unique — they act as the memory's identity.
+    Writing to an existing key updates it.
+
+    Args:
+        key: Descriptive identifier for the memory (e.g. "contact:john-smith:vehicle-preference").
+        content: The fact, preference, or context to remember.
+        category: One of: contact, preference, fact, session, dealer.
+        related_contact_id: Optional GHL contact ID if this memory is about a specific person.
+    """
+    if not _mem_configured():
+        return _validation_error("Memory storage is not configured.", field="key")
+    if not key.strip():
+        return _validation_error("key cannot be empty", field="key")
+    if not content.strip():
+        return _validation_error("content cannot be empty", field="content")
+    valid_categories = {"contact", "preference", "fact", "session", "dealer"}
+    if category not in valid_categories:
+        return _validation_error(
+            f"category must be one of: {', '.join(sorted(valid_categories))}",
+            field="category",
+            allowed_values=sorted(valid_categories),
+        )
+
+    row: dict[str, Any] = {
+        "location_id": _kb_location_id(),
+        "key": key.strip(),
+        "content": content.strip(),
+        "category": category,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if related_contact_id:
+        row["related_contact_id"] = related_contact_id
+
+    headers = _mem_headers()
+    headers["Prefer"] = "return=representation,resolution=merge-duplicates"
+    try:
+        async with httpx.AsyncClient(base_url=_mem_base_url(), headers=headers, timeout=15.0) as c:
+            r = await c.post(f"/rest/v1/{_MEMORY_TABLE}", json=row)
+            r.raise_for_status()
+            rows = r.json()
+            saved = rows[0] if rows else row
+        return _success({
+            "memory": {
+                "key": saved.get("key", key),
+                "content": saved.get("content", content),
+                "category": saved.get("category", category),
+                "related_contact_id": saved.get("related_contact_id"),
+            },
+            "action": "saved",
+        })
+    except httpx.HTTPStatusError as e:
+        return _validation_error(f"Failed to write memory: {e.response.text}", field="key")
+
+
+@mcp.tool()
+async def memory_read(key: str) -> str:
+    """Read a specific memory by its key.
+
+    Args:
+        key: The memory key to retrieve.
+    """
+    if not _mem_configured():
+        return _validation_error("Memory storage is not configured.", field="key")
+
+    params = [
+        ("select", "key,content,category,related_contact_id,created_at,updated_at"),
+        ("location_id", f"eq.{_kb_location_id()}"),
+        ("key", f"eq.{key}"),
+        ("limit", "1"),
+    ]
+    try:
+        async with httpx.AsyncClient(base_url=_mem_base_url(), headers=_mem_headers(), timeout=15.0) as c:
+            r = await c.get(f"/rest/v1/{_MEMORY_TABLE}", params=params)
+            r.raise_for_status()
+            rows = r.json()
+        if not rows:
+            return _validation_error(f"Memory '{key}' not found.", field="key")
+        return _success({"memory": rows[0]})
+    except httpx.HTTPStatusError as e:
+        return _validation_error(f"Failed to read memory: {e.response.text}", field="key")
+
+
+@mcp.tool()
+async def memory_search(
+    query: str = "",
+    category: str = "",
+    related_contact_id: str = "",
+    limit: int = 20,
+) -> str:
+    """Search Jimmy's memories by keyword, category, or contact.
+
+    TRIGGER: Before interacting with a contact, search their memories.
+    Before answering domain questions, check for relevant dealer/preference memories.
+
+    Args:
+        query: Free-text search across memory keys and content.
+        category: Optional filter by category (contact, preference, fact, session, dealer).
+        related_contact_id: Optional GHL contact ID to find memories about a specific person.
+        limit: Maximum memories to return (1-100).
+    """
+    if not _mem_configured():
+        return _validation_error("Memory storage is not configured.", field="query")
+    if not any([query, category, related_contact_id]):
+        return _validation_error("At least one of query, category, or related_contact_id is required.", field="query")
+
+    params: list[tuple[str, str]] = [
+        ("select", "key,content,category,related_contact_id,created_at,updated_at"),
+        ("location_id", f"eq.{_kb_location_id()}"),
+        ("order", "updated_at.desc"),
+        ("limit", str(min(max(limit, 1), 100))),
+    ]
+    if category:
+        params.append(("category", f"eq.{category}"))
+    if related_contact_id:
+        params.append(("related_contact_id", f"eq.{related_contact_id}"))
+    if query:
+        # Use Postgres full-text search
+        params.append(("search_vector", f"fts.{query}"))
+
+    try:
+        async with httpx.AsyncClient(base_url=_mem_base_url(), headers=_mem_headers(), timeout=15.0) as c:
+            r = await c.get(f"/rest/v1/{_MEMORY_TABLE}", params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return _success({"memories": rows, "count": len(rows), "query": query or None})
+    except httpx.HTTPStatusError as e:
+        return _validation_error(f"Failed to search memories: {e.response.text}", field="query")
+
+
+@mcp.tool()
+async def memory_list(category: str = "", limit: int = 50) -> str:
+    """List all memories, optionally filtered by category.
+
+    Args:
+        category: Optional filter by category (contact, preference, fact, session, dealer).
+        limit: Maximum memories to return (1-100).
+    """
+    if not _mem_configured():
+        return _validation_error("Memory storage is not configured.", field="category")
+
+    params: list[tuple[str, str]] = [
+        ("select", "key,content,category,related_contact_id,updated_at"),
+        ("location_id", f"eq.{_kb_location_id()}"),
+        ("order", "updated_at.desc"),
+        ("limit", str(min(max(limit, 1), 100))),
+    ]
+    if category:
+        params.append(("category", f"eq.{category}"))
+
+    try:
+        async with httpx.AsyncClient(base_url=_mem_base_url(), headers=_mem_headers(), timeout=15.0) as c:
+            r = await c.get(f"/rest/v1/{_MEMORY_TABLE}", params=params)
+            r.raise_for_status()
+            rows = r.json()
+        return _success({"memories": rows, "count": len(rows)})
+    except httpx.HTTPStatusError as e:
+        return _validation_error(f"Failed to list memories: {e.response.text}", field="category")
+
+
+@mcp.tool()
+async def memory_delete(key: str) -> str:
+    """Delete a specific memory by its key.
+
+    Args:
+        key: The memory key to delete.
+    """
+    if not _mem_configured():
+        return _validation_error("Memory storage is not configured.", field="key")
+
+    params = [
+        ("location_id", f"eq.{_kb_location_id()}"),
+        ("key", f"eq.{key}"),
+    ]
+    headers = _mem_headers()
+    headers["Prefer"] = "return=representation"
+    try:
+        async with httpx.AsyncClient(base_url=_mem_base_url(), headers=headers, timeout=15.0) as c:
+            r = await c.delete(f"/rest/v1/{_MEMORY_TABLE}", params=params)
+            r.raise_for_status()
+            rows = r.json()
+        if not rows:
+            return _validation_error(f"Memory '{key}' not found.", field="key")
+        return _success({"deleted": key})
+    except httpx.HTTPStatusError as e:
+        return _validation_error(f"Failed to delete memory: {e.response.text}", field="key")
 
 
 if __name__ == "__main__":

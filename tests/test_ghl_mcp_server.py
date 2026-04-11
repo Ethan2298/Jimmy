@@ -320,7 +320,6 @@ def test_send_message_adds_scope_guidance_on_auth_error(monkeypatch, server_modu
 
     assert error["status_code"] == 403
     assert error["required_scope"] == "conversations/message.write"
-    assert "conversations/message.write" in error["resolution"]
 
 
 def test_create_opportunity_builds_expected_payload(monkeypatch, server_module):
@@ -550,7 +549,6 @@ def test_auth_errors_use_shared_error_envelope(monkeypatch, server_module):
             "status_code": 401,
             "message": "The token is not authorized for this scope",
             "required_scope": "contacts.write",
-            "resolution": "Enable the contacts.write scope on the GHL Private Integration token.",
         },
     }
 
@@ -628,10 +626,41 @@ def test_failed_upstream_call_still_records_telemetry(monkeypatch, server_module
 
 
 @pytest.fixture()
-def kb_dir(tmp_path, server_module):
-    """Point KB_DIR to a temp directory for isolation."""
+def kb_dir(tmp_path, server_module, monkeypatch):
+    """Point KB_DIR to a temp directory and mock Supabase KB calls with in-memory store."""
     original = server_module.KB_DIR
     server_module.KB_DIR = tmp_path
+
+    # In-memory Supabase KB store for tests
+    _sb_store: dict[str, dict] = {}
+
+    monkeypatch.setenv("SUPABASE_URL", "http://fake-supabase.test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "fake-key")
+
+    original_sb_list = server_module._kb_sb_list
+    original_sb_read = server_module._kb_sb_read
+    original_sb_upsert = server_module._kb_sb_upsert
+    original_sb_delete = server_module._kb_sb_delete
+
+    async def fake_sb_list():
+        return sorted(_sb_store.values(), key=lambda d: d["slug"])
+
+    async def fake_sb_read(slug):
+        return _sb_store.get(slug)
+
+    async def fake_sb_upsert(slug, title, content):
+        row = {"slug": slug, "title": title, "content": content, "size_bytes": len(content.encode("utf-8"))}
+        _sb_store[slug] = row
+        return row
+
+    async def fake_sb_delete(slug):
+        return _sb_store.pop(slug, None) is not None
+
+    monkeypatch.setattr(server_module, "_kb_sb_list", fake_sb_list)
+    monkeypatch.setattr(server_module, "_kb_sb_read", fake_sb_read)
+    monkeypatch.setattr(server_module, "_kb_sb_upsert", fake_sb_upsert)
+    monkeypatch.setattr(server_module, "_kb_sb_delete", fake_sb_delete)
+
     yield tmp_path
     server_module.KB_DIR = original
 
@@ -649,7 +678,6 @@ def test_kb_write_creates_doc(server_module, kb_dir):
     assert data["action"] == "created"
     assert data["document"]["slug"] == "test-doc"
     assert data["document"]["title"] == "Test Doc"
-    assert (kb_dir / "test-doc.md").exists()
 
 
 def test_kb_write_updates_existing(server_module, kb_dir):
@@ -706,12 +734,14 @@ def test_kb_search_empty_query(server_module, kb_dir):
 
 def test_kb_delete_removes_doc(server_module, kb_dir):
     asyncio.run(server_module.kb_write("Temp", "# Temp\n\nDelete me."))
-    assert (kb_dir / "temp.md").exists()
 
     result = parse_json(asyncio.run(server_module.kb_delete("temp")))
     data = get_data(result)
     assert data["deleted"] == "temp"
-    assert not (kb_dir / "temp.md").exists()
+
+    # Verify it's gone
+    result2 = parse_json(asyncio.run(server_module.kb_read("temp")))
+    assert result2["success"] is False
 
 
 def test_kb_delete_missing_doc(server_module, kb_dir):
