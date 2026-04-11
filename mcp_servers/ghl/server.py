@@ -1100,11 +1100,16 @@ async def get_user(user_id: str) -> str:
 
 
 def _kb_slug(name: str) -> str:
-    """Turn a human name into a filename slug."""
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    if not slug:
+    """Turn a human name into a filename slug, preserving '/' as folder separators."""
+    parts = name.split("/")
+    slugged = []
+    for part in parts:
+        s = re.sub(r"[^a-z0-9]+", "-", part.strip().lower()).strip("-")
+        if s:
+            slugged.append(s)
+    if not slugged:
         raise ValueError("name must contain at least one alphanumeric character")
-    return slug
+    return "/".join(slugged)
 
 
 def _kb_doc_to_dict(path: Path) -> dict[str, Any]:
@@ -1116,8 +1121,11 @@ def _kb_doc_to_dict(path: Path) -> dict[str, Any]:
         if line.startswith("# "):
             title = line[2:].strip()
             break
+    # Build slug as relative path from KB_DIR without .md extension
+    rel = path.relative_to(KB_DIR).with_suffix("")
+    slug = rel.as_posix()
     return {
-        "slug": path.stem,
+        "slug": slug,
         "title": title,
         "content": content,
         "size_bytes": len(content.encode("utf-8")),
@@ -1125,18 +1133,35 @@ def _kb_doc_to_dict(path: Path) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def kb_list() -> str:
-    """List all knowledge base documents.
+async def kb_list(folder: str = "") -> str:
+    """List knowledge base documents, optionally filtered to a folder.
 
-    Returns titles, slugs, and sizes of all docs in the dealership knowledge base.
+    Returns titles, slugs, and sizes. Includes a tree view of the folder structure.
     Use slugs with kb_read to fetch full content.
+
+    Args:
+        folder: Optional folder path to list (e.g. "pipeline"). Empty string lists everything.
     """
     KB_DIR.mkdir(parents=True, exist_ok=True)
+    base = KB_DIR / folder if folder else KB_DIR
+    if not base.exists():
+        return _success({"documents": [], "folders": [], "count": 0, "folder": folder or "/"})
     docs = []
-    for path in sorted(KB_DIR.glob("*.md")):
+    child_folders: set[str] = set()
+    for path in sorted(base.rglob("*.md")):
         doc = _kb_doc_to_dict(path)
         docs.append({"slug": doc["slug"], "title": doc["title"], "size_bytes": doc["size_bytes"]})
-    return _success({"documents": docs, "count": len(docs)})
+    # Collect immediate child directories of the target folder
+    if base.exists():
+        for child in sorted(base.iterdir()):
+            if child.is_dir():
+                child_folders.add(child.relative_to(KB_DIR).as_posix())
+    return _success({
+        "documents": docs,
+        "folders": sorted(child_folders),
+        "count": len(docs),
+        "folder": folder or "/",
+    })
 
 
 @mcp.tool()
@@ -1144,9 +1169,11 @@ async def kb_read(slug: str) -> str:
     """Read a knowledge base document by its slug.
 
     Args:
-        slug: The document slug from kb_list (e.g. "lead-qualification", "follow-up-practices").
+        slug: The document slug from kb_list (e.g. "lead-qualification", "pipeline/car-sales-stages").
     """
-    path = KB_DIR / f"{slug}.md"
+    path = (KB_DIR / f"{slug}.md").resolve()
+    if not path.is_relative_to(KB_DIR.resolve()):
+        return _validation_error("Invalid slug — path traversal not allowed.", field="slug")
     if not path.exists():
         return _validation_error(f"Document '{slug}' not found. Use kb_list to see available documents.", field="slug")
     doc = _kb_doc_to_dict(path)
@@ -1160,8 +1187,10 @@ async def kb_write(name: str, content: str) -> str:
     Use this to capture dealership knowledge — sales practices, inventory notes,
     customer personas, objection handling, or anything the team wants the agent to know.
 
+    Supports folders: use "/" in the name to organize docs (e.g. "pipeline/Car Sales Stages").
+
     Args:
-        name: Human-readable document name (e.g. "Classic Car Buyers"). Gets slugified for the filename.
+        name: Document name, optionally with folder path (e.g. "pipeline/Car Sales Stages"). Gets slugified.
         content: Full markdown content for the document. Start with a # heading matching the name.
     """
     if not content.strip():
@@ -1171,8 +1200,10 @@ async def kb_write(name: str, content: str) -> str:
     except ValueError as e:
         return _validation_error(str(e), field="name")
 
-    KB_DIR.mkdir(parents=True, exist_ok=True)
-    path = KB_DIR / f"{slug}.md"
+    path = (KB_DIR / f"{slug}.md").resolve()
+    if not path.is_relative_to(KB_DIR.resolve()):
+        return _validation_error("Invalid name — path traversal not allowed.", field="name")
+    path.parent.mkdir(parents=True, exist_ok=True)
     existed = path.exists()
     path.write_text(content, encoding="utf-8")
 
@@ -1184,25 +1215,27 @@ async def kb_write(name: str, content: str) -> str:
 
 
 @mcp.tool()
-async def kb_search(query: str) -> str:
+async def kb_search(query: str, folder: str = "") -> str:
     """Search knowledge base documents by keyword.
 
-    Searches document titles and content for the query string. Case-insensitive.
+    Searches document titles, content, and folder paths for the query string. Case-insensitive.
 
     Args:
-        query: Search term to find across all knowledge base documents.
+        query: Search term to find across knowledge base documents.
+        folder: Optional folder to limit the search (e.g. "pipeline"). Empty searches everything.
     """
     if not query.strip():
         return _validation_error("query cannot be empty", field="query")
 
     KB_DIR.mkdir(parents=True, exist_ok=True)
+    base = KB_DIR / folder if folder else KB_DIR
     query_lower = query.lower()
     results = []
-    for path in sorted(KB_DIR.glob("*.md")):
+    for path in sorted(base.rglob("*.md")):
         doc = _kb_doc_to_dict(path)
         full_text = doc["content"].lower()
-        if query_lower in full_text or query_lower in doc["title"].lower():
-            # Find matching lines for context
+        slug_text = doc["slug"].lower()
+        if query_lower in full_text or query_lower in doc["title"].lower() or query_lower in slug_text:
             snippets = []
             for line in doc["content"].splitlines():
                 if query_lower in line.lower() and line.strip():
@@ -1223,13 +1256,20 @@ async def kb_delete(slug: str) -> str:
     """Delete a knowledge base document.
 
     Args:
-        slug: The document slug from kb_list.
+        slug: The document slug from kb_list (e.g. "lead-qualification", "pipeline/car-sales-stages").
     """
-    path = KB_DIR / f"{slug}.md"
+    path = (KB_DIR / f"{slug}.md").resolve()
+    if not path.is_relative_to(KB_DIR.resolve()):
+        return _validation_error("Invalid slug — path traversal not allowed.", field="slug")
     if not path.exists():
         return _validation_error(f"Document '{slug}' not found. Use kb_list to see available documents.", field="slug")
     title = _kb_doc_to_dict(path)["title"]
     path.unlink()
+    # Clean up empty parent folders
+    parent = path.parent
+    while parent != KB_DIR and parent.exists() and not any(parent.iterdir()):
+        parent.rmdir()
+        parent = parent.parent
     return _success({"deleted": slug, "title": title})
 
 
