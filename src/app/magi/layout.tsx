@@ -1,7 +1,7 @@
 import "./magi.css";
 
 export const metadata = {
-  title: "Magi",
+  title: "Jimmy Console",
 };
 
 export default function MagiLayout({ children }: { children: React.ReactNode }) {

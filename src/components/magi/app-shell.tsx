@@ -14,8 +14,8 @@ interface AppShellProps {
   sidebarOpen: boolean;
   sidebarWidth: number;
   onSidebarWidthChange: (width: number) => void;
-  onToggleSidebar: () => void;
   sidebar: ReactNode;
+  header?: ReactNode;
   stream: ReactNode;
   composer: ReactNode;
 }
@@ -26,8 +26,8 @@ export function AppShell({
   sidebarOpen,
   sidebarWidth,
   onSidebarWidthChange,
-  onToggleSidebar,
   sidebar,
+  header,
   stream,
   composer,
 }: AppShellProps) {
@@ -36,6 +36,7 @@ export function AppShell({
   const dragStateRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const resizeHandleRef = useRef<HTMLDivElement | null>(null);
   const liveSidebarWidthRef = useRef(sidebarWidth);
+  const renderedSidebarWidth = isResizing ? liveSidebarWidth : sidebarWidth;
 
   const endResize = useCallback((commitWidth: boolean) => {
     const dragState = dragStateRef.current;
@@ -63,21 +64,17 @@ export function AppShell({
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
       handle.setPointerCapture(event.pointerId);
+      liveSidebarWidthRef.current = sidebarWidth;
+      setLiveSidebarWidth(sidebarWidth);
       setIsResizing(true);
       dragStateRef.current = {
         pointerId: event.pointerId,
         startX: event.clientX,
-        startWidth: liveSidebarWidthRef.current,
+        startWidth: sidebarWidth,
       };
     },
-    [sidebarOpen]
+    [sidebarOpen, sidebarWidth]
   );
-
-  useEffect(() => {
-    if (dragStateRef.current) return;
-    setLiveSidebarWidth(sidebarWidth);
-    liveSidebarWidthRef.current = sidebarWidth;
-  }, [sidebarWidth]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -103,25 +100,22 @@ export function AppShell({
     };
   }, [endResize]);
 
-  useEffect(() => {
-    if (!sidebarOpen) endResize(true);
-  }, [endResize, sidebarOpen]);
-
   return (
-    <div className="h-screen w-screen overflow-hidden text-white bg-[#0a0a0a]">
-      <div className="h-full w-full flex">
+    <div className="relative h-screen w-screen overflow-hidden bg-[#08090b] text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(110,168,255,0.12),transparent_34%),linear-gradient(180deg,#0a0c10_0%,#08090b_100%)]" />
+      <div className="relative flex h-full w-full">
         {/* Sidebar */}
         <div
           className="relative h-full flex-shrink-0 overflow-hidden"
           style={{
-            width: sidebarOpen ? liveSidebarWidth : 0,
+            width: sidebarOpen ? renderedSidebarWidth : 0,
             transition: isResizing ? "none" : "width 180ms ease",
           }}
         >
           <div
-            className="h-full"
+            className="h-full px-3 py-3 pr-0"
             style={{
-              width: liveSidebarWidth,
+              width: renderedSidebarWidth,
               opacity: sidebarOpen ? 1 : 0,
               transform: sidebarOpen ? "translateX(0)" : "translateX(-8px)",
               transition: isResizing ? "none" : "opacity 140ms ease, transform 180ms ease",
@@ -134,7 +128,7 @@ export function AppShell({
             <div
               ref={resizeHandleRef}
               onPointerDown={handleResizePointerDown}
-              className="absolute top-0 right-0 h-full w-[8px] cursor-col-resize z-20"
+              className="absolute top-0 right-0 z-20 h-full w-[8px] cursor-col-resize"
               style={{ touchAction: "none" }}
               title="Resize sidebar"
             />
@@ -142,8 +136,14 @@ export function AppShell({
         </div>
 
         {/* Main */}
-        <div className="flex-1 min-w-0 h-full flex flex-col">
-          <section className="relative z-10 flex-1 min-h-0 flex flex-col rounded-[5px] overflow-hidden bg-[#171717] m-2 ml-0">
+        <div className="flex h-full min-w-0 flex-1 flex-col p-3 pl-0">
+          <section className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/[0.08] bg-[#101215]/92 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-[radial-gradient(circle_at_top,rgba(161,202,255,0.12),transparent_72%)]" />
+            {header && (
+              <div className="relative shrink-0 border-b border-white/[0.06] px-4 py-3">
+                {header}
+              </div>
+            )}
             <div className="flex-1 min-h-0">{stream}</div>
             {composer}
           </section>

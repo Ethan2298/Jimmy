@@ -33,8 +33,21 @@ class GHLClient:
     # others want location_id (snake_case) and reject the other format.
     SNAKE_CASE_ENDPOINTS = {"/opportunities/search"}
 
+    # Sub-resource endpoints that reject locationId in query params (422).
+    # These resolve the parent entity by the ID in the path, not by location.
+    NO_LOCATION_PATTERNS = {"/notes", "/tasks", "/messages", "/free-slots"}
+
+    def _needs_location(self, path: str) -> bool:
+        """Return False for sub-resource paths that reject locationId."""
+        for pattern in self.NO_LOCATION_PATTERNS:
+            if path.endswith(pattern):
+                return False
+        return True
+
     def _inject_location(self, params: dict | None, path: str = "") -> dict:
         params = params or {}
+        if not self._needs_location(path):
+            return params
         if path in self.SNAKE_CASE_ENDPOINTS:
             if "location_id" not in params:
                 params["location_id"] = self.location_id
@@ -70,11 +83,6 @@ class GHLClient:
                 message = error_data.get("message", resp.text)
             except Exception:
                 message = resp.text
-
-            if resp.status_code == 401:
-                message = f"{message}. Check that the required scope is enabled on the GHL Private Integration Token."
-            elif resp.status_code == 403:
-                message = f"{message}. The PIT token may not have access to this location or resource."
 
             raise GHLAPIError(resp.status_code, message)
 

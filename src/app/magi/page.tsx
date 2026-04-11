@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { readUIMessageStream, type UIMessageChunk } from "ai";
+import { Bug, Code2, PanelLeft, Plus, ShieldCheck } from "lucide-react";
 
 /** Parse SSE response body into a stream of UIMessageChunk objects */
 function sseToJsonStream(body: ReadableStream<Uint8Array>): ReadableStream<UIMessageChunk> {
@@ -166,6 +167,27 @@ function ThinkingIndicator() {
     </div>
   );
 }
+
+const STARTER_PROMPTS = [
+  {
+    title: "Trace a bug",
+    description: "Find the source of a regression and fix it cleanly.",
+    prompt: "Trace the bug in this codebase, explain the root cause, and patch it.",
+    Icon: Bug,
+  },
+  {
+    title: "Refactor a feature",
+    description: "Tighten a flow without changing the product direction.",
+    prompt: "Refactor this feature to simplify the code and keep the behavior stable.",
+    Icon: Code2,
+  },
+  {
+    title: "Review access",
+    description: "Check safety, assumptions, and operational gaps.",
+    prompt: "Review this project for risky assumptions, missing checks, and broken edge cases.",
+    Icon: ShieldCheck,
+  },
+] as const;
 
 export default function MagiPage() {
   const [mounted, setMounted] = useState(false);
@@ -456,13 +478,65 @@ export default function MagiPage() {
     await startStream(thread.id, messagesWithoutLast);
   }, [isStreaming, startStream]);
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((prev) => !prev);
+  }, []);
+
+  const handleStarterPrompt = useCallback((prompt: string) => {
+    setComposerInput(prompt);
+  }, []);
+
+  const permissionLabel = permMode === "ask"
+    ? "Approval required"
+    : permMode === "edits"
+      ? "Auto-approve edits"
+      : "Full access";
+
+  const showWelcome = mounted && activeMessages.length === 0 && !showStreaming;
+
   return (
     <>
       <AppShell
         sidebarOpen={sidebarOpen}
         sidebarWidth={sidebarWidth}
         onSidebarWidthChange={setSidebarWidth}
-        onToggleSidebar={useCallback(() => setSidebarOpen((prev) => !prev), [])}
+        header={
+          <div className="flex items-center gap-3">
+            <button
+              onClick={toggleSidebar}
+              className="flex h-10 w-10 items-center justify-center rounded-[14px] border border-white/[0.08] bg-white/[0.04] text-white/75 transition-colors hover:bg-white/[0.08] hover:text-white"
+              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            >
+              <PanelLeft size={17} />
+            </button>
+
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-white/34">
+                Workspace
+              </p>
+              <h1 className="truncate text-[15px] font-medium text-white">
+                {activeThread?.title ?? "New thread"}
+              </h1>
+            </div>
+
+            <div className="ml-auto hidden items-center gap-2 md:flex">
+              <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-[11px] text-white/60">
+                {model}
+              </span>
+              <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-[11px] text-white/60">
+                {permissionLabel}
+              </span>
+            </div>
+
+            <button
+              onClick={handleNewThread}
+              className="flex h-10 items-center gap-2 rounded-[14px] border border-white/[0.08] bg-white px-3 text-[13px] font-medium text-black transition-opacity hover:opacity-90"
+            >
+              <Plus size={15} />
+              <span className="hidden sm:inline">New thread</span>
+            </button>
+          </div>
+        }
         sidebar={
           <LeftSidebar
             threads={filteredThreads}
@@ -480,11 +554,40 @@ export default function MagiPage() {
             <div
               ref={scrollRef}
               onScroll={handleChatScroll}
-              className="main-chat-scroll h-full overflow-y-auto px-[26px] pt-5 pb-[35px]"
+              className="main-chat-scroll h-full overflow-y-auto px-5 pt-6 pb-10"
             >
-              <div className="mx-auto w-full max-w-[704px] space-y-3">
-                {activeMessages.length === 0 && !showStreaming && (
-                  <p className="text-center text-white/38 text-[13px] py-8">Ask anything</p>
+              <div className="mx-auto w-full max-w-[760px] space-y-5">
+                {showWelcome && (
+                  <div className="flex min-h-full flex-col justify-center py-10">
+                    <div className="mx-auto max-w-[620px] text-center">
+                      <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-white/34">
+                        Jimmy Console
+                      </p>
+                      <h2 className="mt-4 text-[40px] font-medium tracking-[-0.04em] text-white">
+                        What should we work on?
+                      </h2>
+                      <p className="mx-auto mt-4 max-w-[520px] text-[15px] leading-7 text-white/46">
+                        This shell is tuned for the same dense, low-noise workflow as Codex:
+                        threads on the left, code-focused chat in the center, controls docked at the bottom.
+                      </p>
+                    </div>
+
+                    <div className="mt-8 grid gap-3 md:grid-cols-3">
+                      {STARTER_PROMPTS.map(({ title, description, prompt, Icon }) => (
+                        <button
+                          key={title}
+                          onClick={() => handleStarterPrompt(prompt)}
+                          className="group rounded-[22px] border border-white/[0.08] bg-white/[0.03] p-4 text-left transition-all duration-150 hover:border-white/[0.14] hover:bg-white/[0.06]"
+                        >
+                          <div className="flex h-10 w-10 items-center justify-center rounded-[14px] border border-white/[0.08] bg-white/[0.04] text-white/75 transition-colors group-hover:bg-white/[0.08] group-hover:text-white">
+                            <Icon size={18} />
+                          </div>
+                          <h3 className="mt-4 text-[15px] font-medium text-white">{title}</h3>
+                          <p className="mt-2 text-[13px] leading-6 text-white/42">{description}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {activeMessages.map((msg, idx) => (
@@ -502,7 +605,7 @@ export default function MagiPage() {
                       <Message message={streamingMessage} isStreaming />
                     ) : (
                       <div className="flex justify-start animate-msg-enter">
-                        <div className="px-3 py-2">
+                        <div className="px-4 py-3">
                           <ThinkingIndicator />
                         </div>
                       </div>

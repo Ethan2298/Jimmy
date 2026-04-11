@@ -1,6 +1,6 @@
-# RPM — Response & Pipeline Machine
+# Jimmy
 
-An AI-powered SMS sales assistant for a collector car dealership. RPM uses Claude to carry on natural, human-sounding text conversations with prospective buyers, automatically qualifying leads, searching inventory, and booking appointments.
+An AI-powered SMS sales assistant for a collector car dealership. Jimmy uses Claude to carry on natural, human-sounding text conversations with prospective buyers, automatically qualifying leads, searching inventory, and booking appointments.
 
 ## Features
 
@@ -30,7 +30,7 @@ An AI-powered SMS sales assistant for a collector car dealership. RPM uses Claud
 
 ```bash
 # Clone the repo
-git clone <repo-url> && cd rpm
+git clone <repo-url> && cd Jimmy
 
 # Copy environment file and add your API key
 cp .env.example .env
@@ -65,7 +65,7 @@ cd frontend && npm run dev
 ## Project Structure
 
 ```
-rpm/
+Jimmy/
 ├── backend/
 │   ├── ai/
 │   │   ├── engine.py          # Claude tool-use loop

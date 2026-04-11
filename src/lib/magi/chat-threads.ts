@@ -1,5 +1,5 @@
 import type { ChatMessage } from "./ai";
-import { getMessagePreview, getMessageText } from "./ai";
+import { getMessageText } from "./ai";
 
 export interface ChatThread {
   id: string;
@@ -93,7 +93,7 @@ export function deriveThreadTitle(text: string): string {
   const compact = text.replace(/\s+/g, " ").trim();
   if (!compact) return "New thread";
   if (compact.length <= MAX_TITLE_LENGTH) return compact;
-  return `${compact.slice(0, MAX_TITLE_LENGTH - 1).trimEnd()}…`;
+  return `${compact.slice(0, MAX_TITLE_LENGTH - 3).trimEnd()}...`;
 }
 
 export function normalizeChatState(input: unknown, nowISO: string): ChatState {
