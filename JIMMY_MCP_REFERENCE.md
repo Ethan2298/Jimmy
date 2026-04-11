@@ -1,4 +1,4 @@
-# GoHighLevel MCP & API Reference — RPM Integration
+# Jimmy MCP & API Reference — RPM Integration
 
 ## Quick Reference
 
@@ -173,7 +173,7 @@ Returns: `{ pipelines: [...] }`
 
 ---
 
-## GHL Official MCP Server
+## Jimmy Official MCP Server
 
 **Endpoint:** `https://services.leadconnectorhq.com/mcp/`
 **Transport:** HTTP Streamable (not SSE, not stdio)
@@ -182,7 +182,7 @@ Returns: `{ pipelines: [...] }`
 ```json
 {
   "mcpServers": {
-    "ghl-mcp": {
+    "jimmy-mcp": {
       "url": "https://services.leadconnectorhq.com/mcp/",
       "headers": {
         "Authorization": "Bearer pit-a9f10e20-8cb5-4618-9a14-41704f1b61ca",
@@ -343,3 +343,4 @@ MCowBQYDK2VwAyEAi2HR1srL4o18O8BRa7gVJY7G7bupbN3H9AwJrHCDiOg=
 - **Webhooks:** https://marketplace.gohighlevel.com/docs/webhook/WebhookIntegrationGuide/index.html
 - **GitHub API Docs Repo:** https://github.com/GoHighLevel/highlevel-api-docs
 - **Developer Community:** https://developers.gohighlevel.com/
+

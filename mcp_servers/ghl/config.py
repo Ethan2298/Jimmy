@@ -1,6 +1,1 @@
-import os
-
-GHL_API_KEY = os.environ.get("GHL_API_KEY", "").strip()
-GHL_LOCATION_ID = os.environ.get("GHL_LOCATION_ID", "").strip()
-GHL_BASE_URL = "https://services.leadconnectorhq.com"
-GHL_API_VERSION = "2021-07-28"
+from mcp_servers.jimmy.config import *  # noqa: F401,F403
