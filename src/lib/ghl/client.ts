@@ -34,9 +34,25 @@ class GHLClient {
     };
   }
 
-  private injectLocation(params: Record<string, string>): Record<string, string> {
-    if (!params.locationId) {
-      params.locationId = this.locationId;
+  // GHL's API is inconsistent — some endpoints want location_id (snake_case)
+  private static SNAKE_CASE_ENDPOINTS = new Set(["/opportunities/search"]);
+
+  // Sub-resource endpoints that reject locationId in query params (422)
+  private static NO_LOCATION_PATTERNS = ["/notes", "/tasks", "/messages", "/free-slots"];
+
+  private needsLocation(path: string): boolean {
+    for (const pattern of GHLClient.NO_LOCATION_PATTERNS) {
+      if (path.endsWith(pattern)) return false;
+    }
+    return true;
+  }
+
+  private injectLocation(params: Record<string, string>, path: string): Record<string, string> {
+    if (!this.needsLocation(path)) return params;
+    if (GHLClient.SNAKE_CASE_ENDPOINTS.has(path)) {
+      if (!params.location_id) params.location_id = this.locationId;
+    } else {
+      if (!params.locationId) params.locationId = this.locationId;
     }
     return params;
   }
@@ -44,14 +60,18 @@ class GHLClient {
   private buildUrl(path: string, params?: Record<string, string>): string {
     const url = new URL(path, GHL_BASE_URL);
     if (params) {
-      const injected = this.injectLocation({ ...params });
+      const injected = this.injectLocation({ ...params }, path);
       for (const [key, value] of Object.entries(injected)) {
         if (value !== undefined && value !== "") {
           url.searchParams.set(key, value);
         }
       }
-    } else {
-      url.searchParams.set("locationId", this.locationId);
+    } else if (this.needsLocation(path)) {
+      if (GHLClient.SNAKE_CASE_ENDPOINTS.has(path)) {
+        url.searchParams.set("location_id", this.locationId);
+      } else {
+        url.searchParams.set("locationId", this.locationId);
+      }
     }
     return url.toString();
   }
