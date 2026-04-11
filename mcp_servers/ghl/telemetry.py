@@ -187,6 +187,7 @@ class MCPEvent:
 
 @dataclass(slots=True)
 class MCPEventQuery:
+    request_id: str | None = None
     since: datetime | None = None
     until: datetime | None = None
     actor: str | None = None
@@ -232,6 +233,8 @@ class MemoryEventStore:
     async def fetch_events(self, query: MCPEventQuery | None = None) -> list[MCPEvent]:
         query = query or MCPEventQuery()
         events = list(self.events)
+        if query.request_id:
+            events = [event for event in events if event.request_id == query.request_id]
         if query.since is not None:
             events = [event for event in events if event.timestamp >= query.since]
         if query.until is not None:
@@ -276,6 +279,8 @@ class SupabaseEventStore:
         query = query or MCPEventQuery()
         params: list[tuple[str, str]] = [("select", "*"), ("order", "occurred_at.desc"), ("limit", str(query.limit))]
 
+        if query.request_id:
+            params.append(("request_id", f"eq.{query.request_id}"))
         if query.since is not None:
             params.append(("occurred_at", f"gte.{_to_iso_z(query.since)}"))
         if query.until is not None:
@@ -387,6 +392,7 @@ class InstrumentedFastMCP:
                 timestamp = _utc_now()
                 started = time.perf_counter()
                 success = True
+                integration_category = resolve_integration_category()
                 upstream_status: int | None = None
                 scope_required: str | None = None
                 error_code: str | None = None
@@ -416,7 +422,7 @@ class InstrumentedFastMCP:
                         timestamp=timestamp,
                         actor=resolve_actor(),
                         session_id=resolve_session_id(),
-                        integration_category=resolve_integration_category(),
+                        integration_category=integration_category,
                         tool_name=tool_name,
                         duration_ms=duration_ms,
                         success=success,
@@ -425,14 +431,30 @@ class InstrumentedFastMCP:
                         upstream_status=upstream_status,
                         payload_summary=payload_summary,
                     )
+                    LOGGER.info(
+                        f"mcp tool invocation integration={integration_category} tool={tool_name}",
+                        extra={
+                            "tool_name": tool_name,
+                            "request_id": request_id,
+                            "actor": event.actor,
+                            "session_id": event.session_id,
+                            "integration_category": integration_category,
+                            "success": success,
+                            "duration_ms": duration_ms,
+                            "upstream_status": upstream_status,
+                            "scope_required": scope_required,
+                            "error_code": error_code,
+                        },
+                    )
                     try:
                         await self.event_store.write_event(event)
                     except Exception as logging_error:  # pragma: no cover - logging must not affect tool execution
                         LOGGER.warning(
-                            "failed to persist MCP event",
+                            f"failed to persist MCP event integration={integration_category} tool={tool_name}",
                             extra={
                                 "tool_name": tool_name,
                                 "request_id": request_id,
+                                "integration_category": integration_category,
                                 "error": str(logging_error),
                                 "caught_exception": caught_exception.__class__.__name__ if caught_exception else None,
                             },

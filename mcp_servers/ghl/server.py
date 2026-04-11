@@ -9,6 +9,10 @@ from mcp_servers.ghl.client import GHLAPIError, GHLClient
 from mcp_servers.ghl.telemetry import create_instrumented_mcp
 
 KB_DIR = Path(__file__).parent / "knowledge_base"
+SKILL_PREFIX = "skill-"
+SKILL_SETTINGS_SLUG = "skill-settings"
+SKILL_TEMPLATE_SLUG = "skill-template"
+COMMANDS_DIR = Path(__file__).parent / "commands"
 
 mcp = create_instrumented_mcp(
     "MCP Project - GHL Integration",
@@ -97,6 +101,27 @@ def _validate_opportunity_status(status: str, *, allow_all: bool) -> None:
 def _validate_message_type(message_type: str) -> None:
     if message_type not in VALID_MESSAGE_TYPES:
         raise ValueError(f"message_type must be one of: {', '.join(sorted(VALID_MESSAGE_TYPES))}")
+
+
+def _parse_skill_doc(content: str) -> dict[str, Any]:
+    """Extract structured metadata from a skill KB doc."""
+    lines = content.splitlines()
+    meta: dict[str, Any] = {"title": "", "skill": "", "description": "", "mode": "plan", "instructions": ""}
+    instructions_start = None
+    for i, line in enumerate(lines):
+        if line.startswith("# ") and not meta["title"]:
+            meta["title"] = line[2:].strip()
+        elif line.startswith("Skill:"):
+            meta["skill"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Description:"):
+            meta["description"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Mode:"):
+            meta["mode"] = line.split(":", 1)[1].strip()
+        elif line.strip().startswith("## Instructions"):
+            instructions_start = i + 1
+    if instructions_start is not None:
+        meta["instructions"] = "\n".join(lines[instructions_start:]).strip()
+    return meta
 
 
 def _parse_iso8601_datetime(value: str, *, field: str) -> str:
@@ -1206,6 +1231,169 @@ async def kb_delete(slug: str) -> str:
     title = _kb_doc_to_dict(path)["title"]
     path.unlink()
     return _success({"deleted": slug, "title": title})
+
+
+# ── Jimmy skill system ──────────────────────────────────────────────────────
+
+
+@mcp.tool()
+async def jimmy_skills() -> str:
+    """List all available Jimmy skills with descriptions and modes.
+
+    Returns skill names, slugs, descriptions, and interaction modes.
+    Use jimmy_run_skill with a skill slug to execute one.
+    """
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    skills = []
+    for path in sorted(KB_DIR.glob(f"{SKILL_PREFIX}*.md")):
+        slug = path.stem
+        if slug in (SKILL_SETTINGS_SLUG, SKILL_TEMPLATE_SLUG):
+            continue
+        content = path.read_text(encoding="utf-8")
+        meta = _parse_skill_doc(content)
+        skills.append({
+            "slug": slug,
+            "name": meta["title"],
+            "skill_id": meta["skill"],
+            "description": meta["description"],
+            "mode": meta["mode"],
+        })
+    return _success({"skills": skills, "count": len(skills)})
+
+
+@mcp.tool()
+async def jimmy_run_skill(skill_slug: str) -> str:
+    """Load a skill's full instructions for execution.
+
+    Call this to run a specific skill. The response contains instructions
+    to follow step-by-step using the available MCP tools.
+
+    Args:
+        skill_slug: The skill slug (e.g. "skill-triage" or just "triage").
+    """
+    path = KB_DIR / f"{skill_slug}.md"
+    if not path.exists():
+        prefixed = KB_DIR / f"{SKILL_PREFIX}{skill_slug}.md"
+        if prefixed.exists():
+            path = prefixed
+            skill_slug = f"{SKILL_PREFIX}{skill_slug}"
+        else:
+            return _validation_error(
+                f"Skill '{skill_slug}' not found. Use jimmy_skills to see available skills.",
+                field="skill_slug",
+            )
+    content = path.read_text(encoding="utf-8")
+    meta = _parse_skill_doc(content)
+    return _success({
+        "slug": skill_slug,
+        "name": meta["title"],
+        "skill_id": meta["skill"],
+        "description": meta["description"],
+        "mode": meta["mode"],
+        "instructions": meta["instructions"],
+        "mode_hint": {
+            "plan": "Present findings and ask before taking actions.",
+            "execute": "Act on each step directly, report results.",
+            "review": "Read-only analysis. Do not modify any data.",
+        }.get(meta["mode"], "Follow the instructions as written."),
+    })
+
+
+@mcp.tool()
+async def jimmy_settings(action: str = "read", content: str = "") -> str:
+    """Read or write Jimmy user settings.
+
+    Settings include default modes, pinned skills, and mode overrides.
+
+    Args:
+        action: "read" to get current settings, "write" to update them.
+        content: Full markdown content for settings (only used with action="write").
+    """
+    if action not in ("read", "write"):
+        return _validation_error("action must be 'read' or 'write'", field="action")
+
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    path = KB_DIR / f"{SKILL_SETTINGS_SLUG}.md"
+
+    if action == "read":
+        if not path.exists():
+            return _success({"exists": False, "settings": None, "hint": "Run jimmy_setup to initialize default settings."})
+        doc = _kb_doc_to_dict(path)
+        return _success({"exists": True, "settings": doc})
+
+    if not content.strip():
+        return _validation_error("content cannot be empty for write action", field="content")
+    path.write_text(content, encoding="utf-8")
+    doc = _kb_doc_to_dict(path)
+    return _success({"settings": doc, "action": "updated"})
+
+
+@mcp.tool()
+async def jimmy_setup() -> str:
+    """Run the Jimmy guided setup flow.
+
+    Verifies GHL connection, confirms default skills are installed,
+    and returns local command files for Claude to write to .claude/commands/.
+
+    Call this when first setting up Jimmy or to check current state.
+    """
+    # Step 1: Verify connection
+    connection: dict[str, Any] = {"connected": False, "location_name": None, "error": None}
+    try:
+        data = await get_client().get(
+            f"/locations/{get_client().location_id}", params={}
+        )
+        location = data.get("location", data)
+        connection["connected"] = True
+        connection["location_name"] = location.get("name")
+    except GHLAPIError as e:
+        connection["error"] = e.message
+    except Exception as e:
+        connection["error"] = str(e)
+
+    # Step 2: Check which skills exist
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    installed_skills = []
+    missing_skills = []
+    for path in sorted(KB_DIR.glob(f"{SKILL_PREFIX}*.md")):
+        slug = path.stem
+        if slug in (SKILL_SETTINGS_SLUG, SKILL_TEMPLATE_SLUG):
+            continue
+        content = path.read_text(encoding="utf-8")
+        meta = _parse_skill_doc(content)
+        installed_skills.append({
+            "slug": slug,
+            "name": meta["title"],
+            "description": meta["description"],
+            "mode": meta["mode"],
+        })
+
+    # Step 3: Check settings and template
+    settings_exists = (KB_DIR / f"{SKILL_SETTINGS_SLUG}.md").exists()
+    template_exists = (KB_DIR / f"{SKILL_TEMPLATE_SLUG}.md").exists()
+
+    # Step 4: Load command files to return
+    commands = []
+    if COMMANDS_DIR.exists():
+        for cmd_path in sorted(COMMANDS_DIR.glob("*.md")):
+            commands.append({
+                "filename": cmd_path.name,
+                "content": cmd_path.read_text(encoding="utf-8"),
+            })
+
+    return _success({
+        "connection": connection,
+        "skills": installed_skills,
+        "skills_count": len(installed_skills),
+        "settings_exists": settings_exists,
+        "template_exists": template_exists,
+        "commands": commands,
+        "instructions": (
+            "Setup complete. For each item in the 'commands' array, "
+            "write the file to .claude/commands/<filename>. "
+            "Then tell the user what was installed and how to use /jimmy."
+        ),
+    })
 
 
 if __name__ == "__main__":

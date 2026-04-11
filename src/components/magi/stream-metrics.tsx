@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export type StreamUsage = {
   inputTokens: number;
@@ -34,10 +34,8 @@ export function StreamMetrics({ isStreaming, startTime, usage }: StreamMetricsPr
 
   useEffect(() => {
     if (!isStreaming || !startTime) {
-      setElapsed(0);
       return;
     }
-    setElapsed(Date.now() - startTime);
     const interval = setInterval(() => {
       setElapsed(Date.now() - startTime);
     }, 1000);
@@ -45,11 +43,7 @@ export function StreamMetrics({ isStreaming, startTime, usage }: StreamMetricsPr
   }, [isStreaming, startTime]);
 
   if (isStreaming && startTime) {
-    return (
-      <div className="text-[11px] text-white/25 mt-1">
-        {formatElapsed(elapsed)}
-      </div>
-    );
+    return <div className="mt-1 text-[11px] text-white/25">{formatElapsed(elapsed)}</div>;
   }
 
   if (!isStreaming && usage) {
@@ -60,15 +54,10 @@ export function StreamMetrics({ isStreaming, startTime, usage }: StreamMetricsPr
       const pct = Math.round((usage.cacheReadTokens / usage.inputTokens) * 100);
       if (pct > 0) parts.push(`${pct}% cached`);
     }
-    if (startTime) {
-      const totalMs = Date.now() - startTime;
-      parts.push(formatElapsed(totalMs));
+    if (startTime && elapsed > 0) {
+      parts.push(formatElapsed(elapsed));
     }
-    return (
-      <div className="text-[11px] text-white/25 mt-1">
-        {parts.join(" · ")}
-      </div>
-    );
+    return <div className="mt-1 text-[11px] text-white/25">{parts.join(" / ")}</div>;
   }
 
   return null;

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Jimmy - Marcus",
-  description: "AI sales co-worker for your dealership",
+  title: "Jimmy Console",
+  description: "Codex-style AI engineering workspace for dealership operations",
 };
 
 export default function RootLayout({

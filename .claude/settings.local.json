@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__48280cb1-f647-43fb-9236-46986be182c2__kb_list",
+      "mcp__48280cb1-f647-43fb-9236-46986be182c2__list_calendars",
+      "mcp__48280cb1-f647-43fb-9236-46986be182c2__get_users",
+      "mcp__48280cb1-f647-43fb-9236-46986be182c2__kb_read"
+    ]
+  }
+}

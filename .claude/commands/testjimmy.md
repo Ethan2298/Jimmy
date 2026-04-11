@@ -1,10 +1,12 @@
 ---
-description: Live MCP testing session - inspect the current project surface, starting with the GHL integration
+description: Alias for the current MCP test command - inspect the active project surface, starting with the GHL integration
 ---
 
-# Test Current Project - Live MCP Inspection
+# Test Jimmy - Alias for Current MCP Inspection
 
-You are entering a live testing session for the current MCP project.
+This command is a compatibility alias for [mcp-test](./mcp-test.md).
+
+Use it when you want the same project-aware workflow under the older `/testjimmy` name.
 
 GHL is the active integration category right now. Treat it as one tool group inside the broader project, not the whole product.
 
