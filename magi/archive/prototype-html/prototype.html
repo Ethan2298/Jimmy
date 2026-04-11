@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outcome AI — Daily Focus Prototype</title>
+<style>
+/* ===== Design tokens (exact from index.css) ===== */
+:root {
+  --background: #101012;
+  --foreground: #f7f8f8;
+  --muted: #101012;
+  --muted-foreground: #8a8f98;
+  --border: #1e1e1e;
+  --sidebar: #090909;
+  --sidebar-foreground: #d0d6e0;
+  --sidebar-border: #23252a;
+  --sidebar-accent: rgba(255,255,255,0.06);
+  --accent: rgba(255,255,255,0.06);
+  --accent-foreground: #f7f8f8;
+  --primary: #5e6ad2;
+  --primary-foreground: #fff;
+  --input-surface: #161718;
+  --card: #17181B;
+  --card-hover: #1e1f22;
+  --subtle-tint: rgba(255,255,255,0.02);
+  --user-bubble: #1c1c1f;
+  --radius: 0.5rem;
+}
+
+/* ===== Reset ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--sidebar);color:var(--foreground);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5}
+button{font:inherit;color:inherit}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted-foreground)}
+
+/* ===== App shell — matches the real Electron layout ===== */
+#app{display:flex;height:100vh;width:100vw;overflow:hidden;background:var(--sidebar)}
+
+/* Left sidebar — matches AreasSidebar (w-48 = 192px) */
+.sidebar{
+  width:192px;flex-shrink:0;
+  display:flex;flex-direction:column;
+  padding:40px 0 0;
+  background:var(--sidebar);
+  overflow:hidden;
+}
+.sidebar-nav{
+  display:flex;flex-direction:column;gap:1px;
+  padding:0 8px;flex:1;
+}
+.sidebar-item{
+  display:flex;align-items:center;gap:8px;
+  height:28px;padding:0 8px;border-radius:2px;
+  font-size:14px;font-weight:400;
+  color:#8a8f98;cursor:pointer;
+  transition:background .15s,color .15s;
+  background:transparent;border:none;
+  text-align:left;white-space:nowrap;
+}
+.sidebar-item svg{width:14px;height:14px;flex-shrink:0}
+.sidebar-item:hover{color:#f7f8f8;background:var(--sidebar-accent)}
+.sidebar-item.active{color:#f7f8f8;background:var(--sidebar-accent)}
+.sidebar-spacer{flex:1}
+.sidebar-footer{
+  border-top:1px solid var(--sidebar-border);
+  padding:8px;
+}
+
+/* Main content inset card — matches App.tsx: pt-8 pb-2 pr-2 bg-sidebar */
+.main-area{
+  flex:1;display:flex;flex-direction:column;
+  padding:32px 8px 8px 0;min-width:0;
+  transition:padding .2s;
+}
+.main-card{
+  flex:1;overflow:hidden;border-radius:2px;
+  background:var(--background);
+  border:1px solid var(--border);
+  box-shadow:0 2px 3px -3px rgba(0,0,0,.2);
+  display:flex;flex-direction:column;
+}
+
+/* Views container */
+.views{flex:1;position:relative;overflow:hidden;min-height:0}
+.view{position:absolute;inset:0;overflow-y:auto;opacity:0;pointer-events:none;transition:opacity .2s}
+.view.active{opacity:1;pointer-events:auto}
+
+/* ===== TODAY VIEW ===== */
+.today-inner{max-width:620px;margin:0 auto;padding:24px 32px 32px}
+.greeting{font-size:28px;font-weight:600;letter-spacing:-.025em;line-height:1.2}
+.dateline{margin-top:6px;font-size:13px;color:var(--muted-foreground)}
+.today-section{margin-top:36px}
+.area-header{
+  display:flex;align-items:center;gap:10px;
+  margin-bottom:8px;padding:0 2px;
+}
+.area-badge{
+  width:26px;height:26px;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.area-badge svg{width:14px;height:14px}
+.area-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted-foreground)}
+.task-row{
+  display:flex;align-items:center;gap:12px;
+  padding:9px 12px;border-radius:8px;
+  transition:background .15s;cursor:default;
+}
+.task-row:hover{background:var(--accent)}
+.t-check{
+  width:18px;height:18px;border-radius:50%;
+  border:1.5px solid rgba(138,143,152,.5);
+  background:transparent;cursor:pointer;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .2s;padding:0;
+}
+.t-check:hover{border-color:var(--muted-foreground)}
+.t-check.done{background:var(--muted-foreground);border-color:var(--muted-foreground)}
+.t-check svg{width:10px;height:10px;color:var(--background);opacity:0;transition:opacity .15s}
+.t-check.done svg{opacity:1}
+.t-title{flex:1;font-size:14px;transition:all .3s}
+.t-title.done{text-decoration:line-through;opacity:.35;text-decoration-color:rgba(138,143,152,.4)}
+.t-pill{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 10px;border-radius:999px;
+  font-size:11px;font-weight:500;cursor:pointer;
+  transition:all .15s;white-space:nowrap;flex-shrink:0;
+}
+.t-pill:hover{filter:brightness(1.2)}
+.t-arc{width:24px;height:24px;flex-shrink:0}
+.t-arc svg{width:24px;height:24px}
+
+/* ===== GOALS VIEW — two-panel layout ===== */
+.goals-layout{display:flex;height:100%;overflow:hidden}
+
+/* Goals sidebar (left panel) */
+.goals-sidebar{
+  width:220px;flex-shrink:0;
+  background:var(--background);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  overflow:hidden;
+}
+.goals-sidebar-header{
+  padding:20px 16px 12px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.goals-sidebar-label{
+  font-size:12px;font-weight:500;text-transform:uppercase;
+  letter-spacing:.06em;color:rgba(138,143,152,.6);
+}
+.goals-sidebar-count{
+  font-size:11px;color:rgba(138,143,152,.4);
+}
+.goals-sidebar-list{
+  flex:1;overflow-y:auto;padding:0 8px 12px;
+  display:flex;flex-direction:column;gap:6px;
+}
+.goal-card{
+  width:100%;text-align:left;display:flex;flex-direction:column;
+  padding:10px 12px;border-radius:2px;
+  border:1px solid rgba(30,30,30,.5);
+  background:var(--card);
+  cursor:pointer;transition:all .15s;
+  box-shadow:0 1px 2px 0 rgba(0,0,0,.05);
+}
+.goal-card:hover{border-color:var(--border);background:var(--card-hover)}
+.goal-card.active{border-color:var(--border);background:var(--card);box-shadow:0 1px 2px 0 rgba(0,0,0,.05)}
+.goal-card-area{
+  display:flex;align-items:center;gap:5px;margin-bottom:4px;
+}
+.goal-card-area-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.goal-card-area-label{font-size:10px;color:rgba(138,143,152,.5);font-weight:500}
+.goal-card-title{font-size:14px;font-weight:500;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* Goals main content (center) */
+.goals-main{
+  flex:1;overflow-y:auto;min-width:0;
+  transition:margin .3s;
+}
+.goals-main.chat-open{margin-right:420px}
+.goals-inner{max-width:672px;margin:0 auto;padding:24px 32px 64px}
+
+/* Identity */
+.g-identity{font-size:14px;font-style:italic;color:var(--muted-foreground);margin-bottom:24px;line-height:1.5}
+
+/* Goal super-label and title */
+.g-super-label{
+  font-size:11px;font-weight:500;text-transform:uppercase;
+  letter-spacing:.1em;color:rgba(138,143,152,.4);
+  display:block;
+}
+.g-title{
+  font-size:30px;font-weight:600;letter-spacing:-.025em;
+  line-height:1.2;margin-top:6px;margin-bottom:16px;
+}
+
+/* Progress */
+.g-progress{margin-bottom:28px}
+.g-track{
+  width:100%;height:5px;border-radius:3px;
+  background:rgba(255,255,255,.06);position:relative;
+}
+.g-fill{height:100%;border-radius:3px;transition:width .5s}
+.g-marker{
+  position:absolute;top:-5px;width:15px;height:15px;border-radius:50%;
+  border:2px solid var(--border);background:var(--card);
+  transform:translateX(-50%);transition:all .3s;
+}
+.g-marker.hit{border-color:var(--primary);background:var(--primary)}
+.g-marker-label{
+  position:absolute;top:20px;transform:translateX(-50%);
+  font-size:10px;color:var(--muted-foreground);white-space:nowrap;
+  font-weight:500;
+}
+.g-pct{
+  display:flex;justify-content:space-between;margin-top:14px;
+  font-size:11px;color:rgba(138,143,152,.5);
+}
+.g-pct-val{font-weight:600}
+
+/* Task card — matches objective-page.tsx: rounded-2xl border-border/50 bg-accent/30 p-6 */
+.g-task-card{
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.06);
+  background:rgba(255,255,255,.03);
+  padding:24px;margin-bottom:24px;
+}
+.g-card-label{
+  font-size:11px;font-weight:500;text-transform:uppercase;
+  letter-spacing:.1em;color:rgba(138,143,152,.4);margin-bottom:12px;
+  display:block;
+}
+.g-card-title{font-size:18px;font-weight:500;line-height:1.35}
+.g-card-desc{margin-top:8px;font-size:13px;color:rgba(138,143,152,.8);line-height:1.55}
+.g-card-actions{display:flex;align-items:center;gap:12px;margin-top:20px}
+
+/* Buttons — matches objective-page.tsx */
+.btn-mark{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:8px 16px;border-radius:8px;
+  border:1px solid rgba(94,106,210,.3);
+  background:rgba(94,106,210,.15);color:var(--primary);
+  font-size:14px;font-weight:500;cursor:pointer;transition:all .15s;
+}
+.btn-mark:hover{background:rgba(94,106,210,.25)}
+.btn-mark svg{width:16px;height:16px}
+.btn-alt{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:8px 12px;border-radius:8px;border:none;
+  background:transparent;color:rgba(138,143,152,.6);
+  font-size:14px;font-weight:500;cursor:pointer;transition:all .15s;
+}
+.btn-alt:hover{color:var(--foreground);background:var(--accent)}
+.btn-alt svg{width:14px;height:14px}
+
+/* WOOP */
+.g-woop{
+  border-radius:12px;border:1px solid var(--border);
+  background:var(--card);padding:18px 20px;margin-bottom:24px;
+}
+.g-woop-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted-foreground);margin-bottom:5px}
+.g-woop-txt{font-size:13px;line-height:1.55;margin-bottom:16px}
+.g-woop-txt:last-child{margin-bottom:0}
+
+/* Collapsible toggles — rounded-full pill buttons */
+.g-toggles{display:flex;gap:8px;margin-bottom:12px}
+.g-toggle{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;border-radius:999px;
+  border:1px solid var(--border);background:transparent;
+  font-size:12px;font-weight:500;cursor:pointer;
+  color:rgba(138,143,152,.4);transition:all .15s;
+}
+.g-toggle:hover{color:var(--muted-foreground);border-color:var(--muted-foreground)}
+.g-toggle.open{border-color:var(--border);background:rgba(255,255,255,.04);color:var(--muted-foreground)}
+.g-toggle svg{width:12px;height:12px}
+.g-toggle .cnt{color:rgba(138,143,152,.4)}
+.g-collapse{max-height:0;opacity:0;overflow:hidden;transition:max-height .3s,opacity .25s}
+.g-collapse.open{max-height:800px;opacity:1}
+
+/* Context items — matches objective-page: rounded-lg border bg-accent/40 px-3 py-3 */
+.ctx-item{
+  padding:12px;font-size:12px;color:var(--muted-foreground);
+  border-radius:8px;border:1px solid var(--border);
+  background:rgba(255,255,255,.03);margin-bottom:6px;line-height:1.5;
+  transition:border-color .15s;
+}
+.ctx-item:hover{border-color:rgba(138,143,152,.3)}
+
+/* Completed items */
+.comp-row{
+  display:flex;align-items:center;gap:12px;
+  padding:8px 12px;border-radius:8px;transition:background .15s;
+}
+.comp-row:hover{background:rgba(255,255,255,.03)}
+.comp-dot{
+  width:20px;height:20px;border-radius:50%;flex-shrink:0;
+  background:rgba(94,106,210,.12);
+  display:flex;align-items:center;justify-content:center;
+}
+.comp-dot svg{width:11px;height:11px;color:var(--primary)}
+.comp-title{flex:1;font-size:13px;color:var(--muted-foreground);text-decoration:line-through;text-decoration-color:rgba(138,143,152,.25)}
+.comp-when{font-size:11px;color:rgba(138,143,152,.35);white-space:nowrap;flex-shrink:0}
+
+/* ===== Chat panel — fixed right side panel ===== */
+.chat-panel{
+  position:fixed;top:0;right:0;bottom:0;width:420px;
+  border-left:1px solid var(--border);
+  background:var(--muted);
+  display:flex;flex-direction:column;
+  z-index:50;
+  transform:translateX(100%);
+  transition:transform .3s ease;
+}
+.chat-panel.open{transform:translateX(0)}
+
+.chat-head{
+  padding:14px 16px 12px;font-size:13px;font-weight:500;
+  border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;
+  flex-shrink:0;
+}
+.chat-head-icon{width:16px;height:16px;color:var(--primary);flex-shrink:0}
+.chat-head-close{
+  margin-left:auto;width:28px;height:28px;border-radius:6px;
+  border:none;background:transparent;color:var(--muted-foreground);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .15s;
+}
+.chat-head-close:hover{color:var(--foreground);background:var(--accent)}
+.chat-head-close svg{width:14px;height:14px}
+.chat-scroll{flex:1;min-height:0;position:relative;overflow:hidden}
+.chat-scroll::before{
+  content:"";position:absolute;top:0;left:0;right:6px;height:24px;
+  background:linear-gradient(var(--muted),transparent);z-index:2;pointer-events:none;
+}
+.chat-scroll::after{
+  content:"";position:absolute;bottom:0;left:0;right:6px;height:24px;
+  background:linear-gradient(transparent,var(--muted));z-index:2;pointer-events:none;
+}
+.chat-msgs{height:100%;overflow-y:auto;padding:16px 16px 8px;display:flex;flex-direction:column;gap:14px}
+.msg-ai{font-size:13px;line-height:1.6;color:var(--foreground)}
+.msg-user{display:flex;justify-content:flex-end}
+.msg-user-b{
+  background:var(--user-bubble);border-radius:14px;
+  padding:10px 14px;font-size:13px;max-width:85%;line-height:1.5;
+}
+.msg-think{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:12px;color:var(--muted-foreground);padding:4px 0;
+}
+.msg-think .dots{display:flex;gap:3px}
+.msg-think .dots span{
+  width:5px;height:5px;border-radius:50%;
+  background:var(--muted-foreground);animation:dp 1.2s infinite;
+}
+.msg-think .dots span:nth-child(2){animation-delay:.2s}
+.msg-think .dots span:nth-child(3){animation-delay:.4s}
+@keyframes dp{
+  0%,80%,100%{opacity:.25;transform:scale(.8)}
+  40%{opacity:1;transform:scale(1)}
+}
+
+/* Chat input — matches objective-page.tsx */
+.chat-input-wrap{padding:12px 14px;flex-shrink:0}
+.chat-input-box{
+  border-radius:16px;background:var(--input-surface);
+  border:1px solid var(--border);padding:12px 8px 8px 12px;
+  transition:border-color .15s,box-shadow .15s;
+}
+.chat-input-box:focus-within{border-color:transparent;box-shadow:0 0 0 2px #4481D8}
+.chat-input-box textarea{
+  width:100%;background:transparent;border:none;color:var(--foreground);
+  font-size:13px;font-family:inherit;resize:none;outline:none;line-height:1.45;
+}
+.chat-input-box textarea::placeholder{color:rgba(138,143,152,.45)}
+.chat-bottom{display:flex;align-items:center;justify-content:flex-end;padding-top:8px}
+.chat-send{
+  width:28px;height:28px;border-radius:8px;border:none;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all .15s;
+  background:var(--accent);color:var(--muted-foreground);
+}
+.chat-send.ready{background:#4481D8;color:#fff}
+.chat-send svg{width:14px;height:14px}
+
+/* Chat toggle button (floating) */
+.chat-toggle{
+  position:fixed;bottom:24px;right:24px;z-index:40;
+  width:48px;height:48px;border-radius:16px;
+  border:1px solid rgba(30,30,30,.6);
+  background:rgba(16,16,18,.9);
+  backdrop-filter:blur(8px);
+  color:var(--primary);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .2s;
+  box-shadow:0 4px 12px rgba(0,0,0,.3);
+}
+.chat-toggle:hover{color:var(--foreground);background:rgba(94,106,210,.15);transform:scale(1.05);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+.chat-toggle svg{width:20px;height:20px}
+.chat-toggle.hidden{display:none}
+
+/* ===== AREAS VIEW ===== */
+.areas-inner{max-width:1060px;margin:0 auto;padding:24px 32px 64px}
+.areas-title{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-bottom:24px}
+.areas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.a-card{
+  border-radius:12px;border:1px solid var(--border);
+  background:var(--card);padding:20px 22px;position:relative;
+  overflow:hidden;transition:background .15s;cursor:default;
+}
+.a-card:hover{background:var(--card-hover)}
+.a-bar{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:2px 0 0 2px}
+.a-head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.a-icon{
+  width:30px;height:30px;border-radius:8px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+}
+.a-icon svg{width:16px;height:16px}
+.a-name{font-size:15px;font-weight:600}
+.a-ident{font-size:12px;font-style:italic;color:var(--muted-foreground);margin-bottom:14px;padding-left:40px;line-height:1.5}
+.a-goal-row{
+  display:flex;align-items:center;gap:12px;
+  padding:9px 12px 9px 40px;border-radius:8px;
+  cursor:pointer;transition:background .15s;
+}
+.a-goal-row:hover{background:var(--accent)}
+.a-goal-title{flex:1;font-size:13px}
+.a-goal-ms{font-size:11px;color:var(--muted-foreground);white-space:nowrap}
+.a-goal-arc{width:28px;height:28px;flex-shrink:0}
+.a-goal-arc svg{width:28px;height:28px}
+
+/* Review card */
+.review-card{
+  margin-top:20px;border-radius:12px;
+  border:1px solid rgba(94,106,210,.15);
+  background:rgba(94,106,210,.04);
+  padding:20px 24px;
+}
+.review-title{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.review-title svg{width:16px;height:16px;color:var(--primary)}
+.review-desc{font-size:13px;color:var(--muted-foreground);line-height:1.55}
+
+/* Toast */
+.toast{
+  position:fixed;bottom:32px;left:50%;
+  transform:translateX(-50%) translateY(16px);
+  background:var(--primary);color:#fff;
+  padding:8px 22px;border-radius:999px;
+  font-size:13px;font-weight:500;
+  opacity:0;transition:all .3s ease;pointer-events:none;z-index:200;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* Nice work replacement card */
+.done-card{
+  border-radius:16px;border:1px solid rgba(94,106,210,.15);
+  background:rgba(94,106,210,.06);padding:32px 24px;
+  text-align:center;margin-bottom:24px;
+}
+.done-card p{font-size:13px;color:var(--primary);font-weight:500}
+
+/* Responsive: stack chat below on narrow screens */
+@media(max-width:900px){
+  .goals-layout{flex-direction:column}
+  .goals-sidebar{width:100%;border-right:none;border-bottom:1px solid var(--border);max-height:200px}
+  .chat-panel{width:100%;position:static;transform:none;height:500px}
+  .goals-main.chat-open{margin-right:0}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Left sidebar — matches AreasSidebar -->
+  <div class="sidebar">
+    <div class="sidebar-nav">
+      <button class="sidebar-item active" data-tab="today">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Today
+      </button>
+      <button class="sidebar-item" data-tab="goals">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        Goals
+      </button>
+      <button class="sidebar-item" data-tab="areas">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+        Areas
+      </button>
+      <div class="sidebar-spacer"></div>
+    </div>
+    <div class="sidebar-footer">
+      <button class="sidebar-item" style="opacity:.6">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        Settings
+      </button>
+    </div>
+  </div>
+
+  <!-- Main area with inset card -->
+  <div class="main-area">
+    <div class="main-card">
+      <div class="views">
+        <div class="view" id="view-today"></div>
+        <div class="view" id="view-goals"></div>
+        <div class="view" id="view-areas"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Chat panel (fixed right side) -->
+<div class="chat-panel" id="chatPanel"></div>
+
+<!-- Chat toggle button -->
+<button class="chat-toggle hidden" id="chatToggle" title="AI Coach">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
+</button>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===== Icons (Lucide SVG paths) ===== */
+const I = {
+  heart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>`,
+  briefcase: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/></svg>`,
+  bookOpen: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`,
+  refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>`,
+  layers: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>`,
+  arrowUp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>`,
+  sparkle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>`,
+  calendar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
+  x: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+};
+
+function arc(pct, color, sz=24) {
+  const r=(sz-3)/2, c=sz/2, C=2*Math.PI*r, off=C*(1-pct);
+  return `<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}">
+    <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="2"/>
+    <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${color}" stroke-width="2"
+      stroke-dasharray="${C}" stroke-dashoffset="${off}" stroke-linecap="round"
+      transform="rotate(-90 ${c} ${c})" style="transition:stroke-dashoffset .5s"/>
+  </svg>`;
+}
+
+/* ===== Mock data ===== */
+const AREAS = [
+  {
+    id:"health", title:"Health & Fitness", icon:"heart", color:"#ef4444",
+    identity:"I am someone who prioritizes physical health and pushes my limits.",
+    goals:[{
+      id:"half-marathon", title:"Run a half marathon",
+      progress:.6, milestone:{pct:.5,label:"10K race done"},
+      identity:"I am a disciplined runner who shows up every day, rain or shine.",
+      task:{id:"t1",title:"30-minute easy run",desc:"Zone 2 heart rate, conversational pace. Focus on form and breathing."},
+      woop:{obstacle:"Feeling too tired after work to go for a run.",plan:"If I feel tired after work, then I will put on my running shoes and commit to just 10 minutes."},
+      context:["Current weekly mileage: 18 miles","Race date: April 15, 2026","Using Hal Higdon Novice 1 plan"],
+      completed:[{title:"Register for April half marathon",when:"2 days ago"},{title:"Buy new running shoes",when:"5 days ago"},{title:"Complete 5K benchmark run",when:"1 week ago"}],
+      chat:[
+        {role:"ai",text:"You've been consistent this week — 3 runs logged. Today's easy run is about recovery. Keep the pace comfortable and focus on your breathing."},
+        {role:"user",text:"Should I do any stretching before?"},
+        {role:"ai",text:"A 5-minute dynamic warm-up is ideal: leg swings, high knees, and walking lunges. Save static stretching for after the run."},
+      ],
+      alts:["Hill repeat intervals (4x200m)","20-minute tempo run at half marathon pace","Cross-training: 30 min cycling"],
+    }],
+  },
+  {
+    id:"career", title:"Career", icon:"briefcase", color:"#3b82f6",
+    identity:"I am a builder who ships real products that solve real problems.",
+    goals:[{
+      id:"side-project", title:"Launch side project",
+      progress:.35, milestone:{pct:.25,label:"MVP built"},
+      identity:"I am someone who follows through on ideas and launches in public.",
+      task:{id:"t2",title:"Write landing page copy",desc:"Hero section, 3 feature bullets, CTA. Keep it concise and benefit-driven."},
+      woop:{obstacle:"Perfectionism — spending too long polishing copy instead of shipping.",plan:"If I spend more than 45 minutes on the copy, then I will publish what I have and iterate based on feedback."},
+      context:["Stack: Next.js + Supabase","Domain: already purchased","Target launch: end of March"],
+      completed:[{title:"Set up Next.js project with Supabase",when:"3 days ago"},{title:"Design database schema",when:"4 days ago"}],
+      chat:[{role:"ai",text:"The landing page is your next leverage point. A clear headline and 3 sharp bullets are all you need to validate interest. Ship it fast."}],
+      alts:["Design the pricing page","Set up Stripe integration","Write the launch tweet thread"],
+    }],
+  },
+  {
+    id:"learning", title:"Learning", icon:"bookOpen", color:"#a855f7",
+    identity:"I am a lifelong learner who embraces challenge and grows through practice.",
+    goals:[{
+      id:"spanish", title:"Become conversational in Spanish",
+      progress:.2, milestone:{pct:.15,label:"500 vocab words"},
+      identity:"I am someone who learns languages by immersing myself daily, even if just for 15 minutes.",
+      task:{id:"t3",title:"15 min Anki review",desc:"Focus on the verb conjugation deck. Flag any cards you get wrong 2+ times."},
+      woop:{obstacle:"Skipping Anki review because it feels tedious.",plan:"If I feel reluctant to open Anki, then I will do just 5 cards to build momentum."},
+      context:["Current level: A2","Using Anki + Language Transfer","Goal: hold a 10-min conversation by June"],
+      completed:[{title:"Complete Language Transfer lessons 1-15",when:"1 week ago"},{title:"Create verb conjugation Anki deck",when:"2 weeks ago"}],
+      chat:[
+        {role:"ai",text:"Consistency beats intensity with language learning. Your 15-minute daily habit is exactly the right approach at this stage."},
+        {role:"user",text:"I keep mixing up ser and estar"},
+        {role:"ai",text:"That's one of the most common challenges! Think of **ser** for permanent traits (identity, origin) and **estar** for temporary states (location, mood, condition). Try making 5 example sentences for each today."},
+      ],
+      alts:["Watch a 10-min Spanish YouTube video with subtitles","Practice 5 sentences using ser vs estar","Listen to a Spanish podcast episode"],
+    }],
+  },
+];
+
+/* ===== State ===== */
+const S = {
+  tab: "today",
+  tasks: AREAS.flatMap(a=>a.goals.map(g=>({
+    areaId:a.id,areaTitle:a.title,areaIcon:a.icon,areaColor:a.color,
+    goalId:g.id,goalTitle:g.title,goalProgress:g.progress,
+    taskId:g.task.id,taskTitle:g.task.title,done:false,
+  }))),
+  selGoal: "half-marathon",
+  taskDone: {},
+  taskTitle: {},
+  extraCompleted: {},
+  extraChat: {},
+  thinking: {},
+  toggles: {},
+  chatOpen: true,
+};
+
+/* ===== Helpers ===== */
+function greeting(){const h=new Date().getHours();return h<12?"Good morning":h<17?"Good afternoon":"Good evening"}
+function dateline(){
+  const d=new Date();
+  const days=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const months=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const extra=d.getDay()===1?" — New week, fresh start":"";
+  return `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}${extra}`;
+}
+function findGoal(id){for(const a of AREAS)for(const g of a.goals)if(g.id===id)return{area:a,goal:g};return null}
+function toast(msg){const e=document.getElementById("toast");e.textContent=msg;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),1800)}
+
+const AI_RESP=[
+  "That's a great question. Based on your recent progress, I'd suggest focusing on consistency over intensity this week.",
+  "I can see you're making solid progress here. Remember — small daily wins compound over time.",
+  "Good thinking. Let me suggest a slight adjustment: try breaking this into two smaller, more concrete steps.",
+  "You're on the right track. Momentum matters more than perfection at this stage.",
+  "Interesting perspective. From your pattern, you tend to do best when you start with the hardest thing first.",
+  "That's completely normal. The key is to lower the activation energy — make starting as easy as possible.",
+];
+
+/* ===== Render ===== */
+function renderNav(){
+  document.querySelectorAll('.sidebar-item[data-tab]').forEach(b=>{
+    b.classList.toggle('active', b.dataset.tab===S.tab);
+  });
+}
+
+function renderToday(){
+  const el=document.getElementById("view-today");
+  const groups={};
+  S.tasks.forEach(t=>{if(!groups[t.areaId])groups[t.areaId]={info:t,tasks:[]};groups[t.areaId].tasks.push(t)});
+  let h=`<div class="today-inner">
+    <div class="greeting">${greeting()}</div>
+    <div class="dateline">${dateline()}</div>`;
+  Object.values(groups).forEach(g=>{
+    h+=`<div class="today-section">
+      <div class="area-header">
+        <div class="area-badge" style="background:${g.info.areaColor}18;color:${g.info.areaColor}">${I[g.info.areaIcon]}</div>
+        <span class="area-label">${g.info.areaTitle}</span>
+      </div>`;
+    g.tasks.forEach(t=>{
+      h+=`<div class="task-row">
+        <button class="t-check${t.done?' done':''}" data-check="${t.taskId}">${I.check}</button>
+        <span class="t-title${t.done?' done':''}">${t.taskTitle}</span>
+        <span class="t-pill" data-goto="${t.goalId}" style="background:${t.areaColor}12;color:${t.areaColor}">${t.goalTitle}</span>
+        <span class="t-arc">${arc(t.goalProgress,t.areaColor)}</span>
+      </div>`;
+    });
+    h+=`</div>`;
+  });
+  h+=`</div>`;
+  el.innerHTML=h;
+}
+
+function renderGoals(){
+  const el=document.getElementById("view-goals");
+  const all=AREAS.flatMap(a=>a.goals.map(g=>({...g,area:a})));
+  const f=findGoal(S.selGoal);if(!f)return;
+  const {area,goal}=f;
+  const tDone=S.taskDone[goal.id];
+  const tTitle=S.taskTitle[goal.id]||goal.task.title;
+  const milestoneHit=goal.progress>=goal.milestone.pct;
+  const ctxKey=`ctx-${goal.id}`,compKey=`comp-${goal.id}`;
+  const ctxOpen=S.toggles[ctxKey]??false, compOpen=S.toggles[compKey]??false;
+  const extras=S.extraCompleted[goal.id]||[];
+
+  let h=`<div class="goals-layout">
+    <div class="goals-sidebar">
+      <div class="goals-sidebar-header">
+        <span class="goals-sidebar-label">Goals</span>
+        <span class="goals-sidebar-count">${all.length}</span>
+      </div>
+      <div class="goals-sidebar-list">
+        ${all.map(g=>
+          `<button class="goal-card${g.id===S.selGoal?' active':''}" data-selgoal="${g.id}">
+            <div class="goal-card-area">
+              <div class="goal-card-area-dot" style="background:${g.area.color}"></div>
+              <span class="goal-card-area-label">${g.area.title}</span>
+            </div>
+            <div class="goal-card-title">${g.title}</div>
+          </button>`
+        ).join("")}
+      </div>
+    </div>
+    <div class="goals-main${S.chatOpen?' chat-open':''}">
+      <div class="goals-inner">
+        <span class="g-super-label">Goal</span>
+        <div class="g-title">${goal.title}</div>
+        <div class="g-identity">"${goal.identity}"</div>
+
+        <div class="g-progress">
+          <div class="g-track">
+            <div class="g-fill" style="width:${goal.progress*100}%;background:${area.color}"></div>
+            <div class="g-marker${milestoneHit?' hit':''}" style="left:${goal.milestone.pct*100}%">
+              <span class="g-marker-label">${goal.milestone.label}</span>
+            </div>
+          </div>
+          <div class="g-pct">
+            <span>0%</span>
+            <span class="g-pct-val" style="color:${area.color}">${Math.round(goal.progress*100)}%</span>
+            <span>100%</span>
+          </div>
+        </div>`;
+
+  if(!tDone){
+    h+=`<div class="g-task-card">
+          <span class="g-card-label">Up next</span>
+          <div class="g-card-title">${tTitle}</div>
+          <div class="g-card-desc">${goal.task.desc}</div>
+          <div class="g-card-actions">
+            <button class="btn-mark" data-markdone="${goal.id}">${I.check} Mark done</button>
+            <button class="btn-alt" data-suggest="${goal.id}">${I.refresh} Suggest another</button>
+          </div>
+        </div>`;
+  } else {
+    h+=`<div class="done-card"><p>Task completed — nice work.</p></div>`;
+  }
+
+  h+=`<div class="g-woop">
+        <div class="g-woop-lbl">Obstacle</div>
+        <div class="g-woop-txt">${goal.woop.obstacle}</div>
+        <div class="g-woop-lbl">If-Then Plan</div>
+        <div class="g-woop-txt">${goal.woop.plan}</div>
+      </div>
+
+      <div class="g-toggles">
+        <button class="g-toggle${ctxOpen?' open':''}" data-toggle="${ctxKey}">
+          ${I.layers} Context <span class="cnt">${goal.context.length}</span>
+        </button>
+        <button class="g-toggle${compOpen?' open':''}" data-toggle="${compKey}">
+          ${I.check} Completed <span class="cnt">${goal.completed.length+extras.length}</span>
+        </button>
+      </div>
+
+      <div class="g-collapse${ctxOpen?' open':''}">
+        ${goal.context.map(c=>`<div class="ctx-item">${c}</div>`).join("")}
+      </div>
+
+      <div class="g-collapse${compOpen?' open':''}">
+        ${[...extras,...goal.completed].map(c=>
+          `<div class="comp-row">
+            <div class="comp-dot">${I.check}</div>
+            <span class="comp-title">${c.title}</span>
+            <span class="comp-when">${c.when}</span>
+          </div>`
+        ).join("")}
+      </div>
+
+    </div><!-- /goals-inner -->
+  </div><!-- /goals-main -->
+  </div><!-- /goals-layout -->`;
+
+  el.innerHTML=h;
+}
+
+function renderChat(){
+  const f=findGoal(S.selGoal);if(!f)return;
+  const {area,goal}=f;
+  const msgs=[...goal.chat,...(S.extraChat[goal.id]||[])];
+  const thinking=S.thinking[goal.id];
+
+  const panel=document.getElementById("chatPanel");
+  panel.innerHTML=`
+    <div class="chat-head">
+      <span class="chat-head-icon">${I.sparkle}</span>
+      AI Coach
+      <button class="chat-head-close" data-chatclose>${I.x}</button>
+    </div>
+    <div class="chat-scroll">
+      <div class="chat-msgs" id="chatMsgs">
+        ${msgs.map(m=>m.role==="ai"
+          ?`<div class="msg-ai">${m.text}</div>`
+          :`<div class="msg-user"><div class="msg-user-b">${m.text}</div></div>`
+        ).join("")}
+        ${thinking?`<div class="msg-think"><span class="dots"><span></span><span></span><span></span></span> thinking...</div>`:""}
+      </div>
+    </div>
+    <div class="chat-input-wrap">
+      <div class="chat-input-box">
+        <textarea id="chatIn" rows="2" placeholder="Talk to AI..."></textarea>
+        <div class="chat-bottom">
+          <button class="chat-send" id="chatSendBtn" data-chatsend="${goal.id}">${I.arrowUp}</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  panel.classList.toggle("open", S.chatOpen && S.tab==="goals");
+
+  // Show/hide toggle button
+  const toggle=document.getElementById("chatToggle");
+  toggle.classList.toggle("hidden", S.tab!=="goals" || S.chatOpen);
+
+  requestAnimationFrame(()=>{
+    const m=document.getElementById("chatMsgs");if(m)m.scrollTop=m.scrollHeight;
+    updSend();
+  });
+}
+
+function updSend(){
+  const inp=document.getElementById("chatIn"),btn=document.getElementById("chatSendBtn");
+  if(inp&&btn){btn.classList.toggle("ready",!!inp.value.trim())}
+}
+
+function renderAreas(){
+  const el=document.getElementById("view-areas");
+  let h=`<div class="areas-inner">
+    <div class="areas-title">Areas</div>
+    <div class="areas-grid">`;
+  AREAS.forEach(a=>{
+    h+=`<div class="a-card">
+      <div class="a-bar" style="background:${a.color}"></div>
+      <div class="a-head">
+        <div class="a-icon" style="background:${a.color}18;color:${a.color}">${I[a.icon]}</div>
+        <span class="a-name">${a.title}</span>
+      </div>
+      <div class="a-ident">"${a.identity}"</div>`;
+    a.goals.forEach(g=>{
+      h+=`<div class="a-goal-row" data-areagoal="${g.id}">
+        <span class="a-goal-arc">${arc(g.progress,a.color,28)}</span>
+        <span class="a-goal-title">${g.title}</span>
+        <span class="a-goal-ms">${g.milestone.label}</span>
+      </div>`;
+    });
+    h+=`</div>`;
+  });
+  h+=`</div>
+    <div class="review-card">
+      <div class="review-title">${I.calendar} Weekly Review</div>
+      <div class="review-desc">Reflect on your progress this week. What worked? What will you adjust? Take 10 minutes to review each area.</div>
+    </div>
+  </div>`;
+  el.innerHTML=h;
+}
+
+function render(){
+  renderNav();renderToday();renderGoals();renderChat();renderAreas();
+  document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
+  document.getElementById(`view-${S.tab}`).classList.add("active");
+
+  // Update chat panel visibility based on tab
+  const panel=document.getElementById("chatPanel");
+  const toggle=document.getElementById("chatToggle");
+  if(S.tab!=="goals"){
+    panel.classList.remove("open");
+    toggle.classList.add("hidden");
+  }
+}
+
+/* ===== Events ===== */
+document.addEventListener("click",e=>{
+  // Sidebar tab switching
+  const tab=e.target.closest("[data-tab]");
+  if(tab){S.tab=tab.dataset.tab;render();return}
+
+  // Today: checkbox
+  const chk=e.target.closest("[data-check]");
+  if(chk){const t=S.tasks.find(x=>x.taskId===chk.dataset.check);if(t){t.done=!t.done;render()}return}
+
+  // Today: goal pill → go to goals view
+  const goto=e.target.closest("[data-goto]");
+  if(goto){S.selGoal=goto.dataset.goto;S.tab="goals";render();return}
+
+  // Goals: selector card in sidebar
+  const sel=e.target.closest("[data-selgoal]");
+  if(sel){S.selGoal=sel.dataset.selgoal;render();return}
+
+  // Goals: mark done
+  const md=e.target.closest("[data-markdone]");
+  if(md){
+    const gid=md.dataset.markdone, f=findGoal(gid);if(!f)return;
+    S.taskDone[gid]=true;
+    if(!S.extraCompleted[gid])S.extraCompleted[gid]=[];
+    S.extraCompleted[gid].unshift({title:S.taskTitle[gid]||f.goal.task.title,when:"just now"});
+    toast("Nice work!");render();
+    setTimeout(()=>{
+      const alts=f.goal.alts;
+      S.taskTitle[gid]=alts[Math.floor(Math.random()*alts.length)];
+      S.taskDone[gid]=false;render();
+    },1500);
+    return;
+  }
+
+  // Goals: suggest another
+  const sg=e.target.closest("[data-suggest]");
+  if(sg){
+    const gid=sg.dataset.suggest,f=findGoal(gid);if(!f)return;
+    const cur=S.taskTitle[gid]||f.goal.task.title;
+    const opts=f.goal.alts.filter(a=>a!==cur);
+    S.taskTitle[gid]=opts[Math.floor(Math.random()*opts.length)]||f.goal.alts[0];
+    render();return;
+  }
+
+  // Collapsible toggle
+  const tg=e.target.closest("[data-toggle]");
+  if(tg){S.toggles[tg.dataset.toggle]=!S.toggles[tg.dataset.toggle];render();return}
+
+  // Areas: goal row → goals view
+  const ag=e.target.closest("[data-areagoal]");
+  if(ag){S.selGoal=ag.dataset.areagoal;S.tab="goals";render();return}
+
+  // Chat close
+  const cc=e.target.closest("[data-chatclose]");
+  if(cc){S.chatOpen=false;render();return}
+
+  // Chat toggle (floating button)
+  if(e.target.closest("#chatToggle")){S.chatOpen=true;render();return}
+
+  // Chat send
+  const cs=e.target.closest("[data-chatsend]");
+  if(cs){sendChat(cs.dataset.chatsend);return}
+});
+
+document.addEventListener("input",e=>{if(e.target.id==="chatIn")updSend()});
+document.addEventListener("keydown",e=>{
+  if(e.target.id==="chatIn"&&e.key==="Enter"&&!e.shiftKey){
+    e.preventDefault();
+    const btn=document.querySelector("[data-chatsend]");
+    if(btn)sendChat(btn.dataset.chatsend);
+  }
+});
+
+function sendChat(gid){
+  const inp=document.getElementById("chatIn");
+  if(!inp||!inp.value.trim())return;
+  const txt=inp.value.trim();
+  if(!S.extraChat[gid])S.extraChat[gid]=[];
+  S.extraChat[gid].push({role:"user",text:txt});
+  S.thinking[gid]=true;render();
+  setTimeout(()=>{
+    S.thinking[gid]=false;
+    S.extraChat[gid].push({role:"ai",text:AI_RESP[Math.floor(Math.random()*AI_RESP.length)]});
+    render();
+  },1200);
+}
+
+/* ===== Init ===== */
+render();
+</script>
+</body>
+</html>

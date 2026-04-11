@@ -29,31 +29,37 @@ class GHLClient:
         )
         self.location_id = GHL_LOCATION_ID
 
-    def _inject_location(self, params: dict | None) -> dict:
+    # GHL's API is inconsistent — some endpoints want locationId (camelCase),
+    # others want location_id (snake_case) and reject the other format.
+    SNAKE_CASE_ENDPOINTS = {"/opportunities/search"}
+
+    def _inject_location(self, params: dict | None, path: str = "") -> dict:
         params = params or {}
-        if "locationId" not in params:
-            params["locationId"] = self.location_id
-        if "location_id" not in params:
-            params["location_id"] = self.location_id
+        if path in self.SNAKE_CASE_ENDPOINTS:
+            if "location_id" not in params:
+                params["location_id"] = self.location_id
+        else:
+            if "locationId" not in params:
+                params["locationId"] = self.location_id
         return params
 
     async def get(self, path: str, params: dict | None = None) -> dict:
-        params = self._inject_location(params)
+        params = self._inject_location(params, path)
         resp = await self._client.get(path, params=params)
         return self._handle_response(resp)
 
     async def post(self, path: str, json: dict | None = None, params: dict | None = None) -> dict:
-        params = self._inject_location(params) if params else None
+        params = self._inject_location(params, path) if params else None
         resp = await self._client.post(path, json=json, params=params)
         return self._handle_response(resp)
 
     async def put(self, path: str, json: dict | None = None, params: dict | None = None) -> dict:
-        params = self._inject_location(params) if params else None
+        params = self._inject_location(params, path) if params else None
         resp = await self._client.put(path, json=json, params=params)
         return self._handle_response(resp)
 
     async def delete(self, path: str, json: dict | None = None, params: dict | None = None) -> dict:
-        params = self._inject_location(params) if params else None
+        params = self._inject_location(params, path) if params else None
         resp = await self._client.request("DELETE", path, json=json, params=params)
         return self._handle_response(resp)
 

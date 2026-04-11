@@ -1,23 +1,34 @@
-# RPM — Marcus, Claude Code Co-Worker for GoHighLevel
+# RPM — Marcus, AI Sales Co-Worker
 
 ## What This Is
 
-Marcus is a Claude Code co-worker that operates directly on GoHighLevel's CRM. GHL is the system of record — contacts, conversations, pipelines, calendars, everything. Marcus reads and writes GHL through MCP tools, working alongside the dealer in real-time.
+RPM is a standalone web app — a chat interface where car dealers work with Marcus, their AI sales co-worker. Marcus operates on GoHighLevel CRM. GHL is the system of record — contacts, conversations, pipelines, calendars, everything. Marcus reads and writes GHL through server-side tool calls.
 
-The dealer talks to Marcus in Claude Code. Marcus pulls up leads, reads conversation history, drafts responses, moves opportunities through pipeline stages, books appointments — all through GHL's API.
+The dealer logs in, chats with Marcus in a ChatGPT-style interface. Marcus pulls up leads, reads conversation history, drafts responses, reviews pipeline stages, books appointments — all through GHL's API.
 
 ---
 
 ## Architecture
 
 ```
-Dealer <-> Claude Code <-> GHL MCP Server <-> GoHighLevel CRM
-                |
-            Marcus personality
-            (CLAUDE.md / skill)
+Dealer (browser) <-> Next.js App <-> Claude API (Marcus) <-> GHL API
+                         |
+                     Supabase
+                  (auth, chat history)
 ```
 
-No backend. No frontend. No database. No infrastructure to maintain.
+### Tech Stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 15 (App Router) |
+| AI/Streaming | Vercel AI SDK + @ai-sdk/anthropic |
+| Styling | Tailwind CSS v4 |
+| Components | shadcn/ui |
+| Database | Supabase (Postgres) — chat sessions + messages |
+| Auth | Supabase Auth |
+| Deployment | Vercel |
+| CRM | GHL API (server-side tool calls) |
 
 ### GHL MCP Connection
 

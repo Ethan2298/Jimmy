@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dither Circle Prototype</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    font-family: -apple-system, BlinkSansSerif, 'Segoe UI', sans-serif;
+    color: #999;
+  }
+  h1 { color: #ccc; margin-bottom: 8px; font-weight: 500; font-size: 20px; }
+  .subtitle { color: #666; margin-bottom: 32px; font-size: 13px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 120px);
+    gap: 32px;
+    justify-content: center;
+    max-width: 900px;
+  }
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .swatch span {
+    font-size: 11px;
+    color: #666;
+  }
+  canvas { border-radius: 50%; }
+
+  .section { margin-top: 48px; margin-bottom: 16px; }
+  .section h2 { color: #aaa; font-size: 15px; font-weight: 500; }
+  .section p { color: #555; font-size: 12px; margin-top: 4px; }
+
+  .sizes-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin-top: 16px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Dither Circle Prototype</h1>
+<p class="subtitle">Animated halftone dither — colors matched from reference</p>
+
+<div class="grid" id="grid"></div>
+
+<div class="section">
+  <h2>Size variants (for overlay bar)</h2>
+  <p>12px, 16px, 20px, 24px, 32px</p>
+</div>
+<div class="sizes-row" id="sizes"></div>
+
+<script>
+// Colors extracted from the reference image via pixel sampling
+const COLORS = [
+  { name: 'pink',    dark: [ 30,  4, 16],  bright: [255, 100, 200] },
+  { name: 'violet',  dark: [ 16,  8, 35],  bright: [180, 140, 255] },
+  { name: 'indigo',  dark: [ 14, 12, 40],  bright: [150, 150, 255] },
+  { name: 'green',   dark: [  3, 20,  2],  bright: [100, 240,  80] },
+  { name: 'amber',   dark: [ 30, 16,  0],  bright: [255, 190,  20] },
+  { name: 'blue',    dark: [  3, 12, 35],  bright: [ 80, 170, 255] },
+  { name: 'rose',    dark: [ 30,  3, 10],  bright: [255, 90, 180] },
+  { name: 'sky',     dark: [  3, 10, 24],  bright: [ 70, 190, 255] },
+  { name: 'gold',    dark: [ 30, 16,  0],  bright: [255, 200,  20] },
+  { name: 'cyan',    dark: [  0, 16, 18],  bright: [  0, 230, 240] },
+  { name: 'emerald', dark: [  2, 22,  4],  bright: [ 50, 230, 100] },
+  { name: 'azure',   dark: [  2, 10, 20],  bright: [ 40, 180, 255] },
+];
+
+// 8x8 Bayer ordered dither matrix — 64 levels for smoother transitions
+const BAYER8 = [
+  [ 0, 32,  8, 40,  2, 34, 10, 42],
+  [48, 16, 56, 24, 50, 18, 58, 26],
+  [12, 44,  4, 36, 14, 46,  6, 38],
+  [60, 28, 52, 20, 62, 30, 54, 22],
+  [ 3, 35, 11, 43,  1, 33,  9, 41],
+  [51, 19, 59, 27, 49, 17, 57, 25],
+  [15, 47,  7, 39, 13, 45,  5, 37],
+  [63, 31, 55, 23, 61, 29, 53, 21],
+];
+
+function createDitherCircle(size, color, container) {
+  const canvas = document.createElement('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  container.appendChild(canvas);
+
+  const ctx = canvas.getContext('2d');
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const radius = canvas.width / 2;
+
+  // Each cell is fully on or fully off — true ordered dithering
+  const cellSize = 3;
+  const dotSize = 3;
+
+  let time = Math.random() * 1000;
+
+  function render() {
+    time += 0.012;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Clip to circle
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Fill entire circle with dark base
+    ctx.fillStyle = `rgb(${color.dark[0]},${color.dark[1]},${color.dark[2]})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Main light rotates around the sphere
+    const lightAngle = time * 0.5;
+    const lx = Math.cos(lightAngle);
+    const ly = Math.sin(lightAngle);
+    const lz = 0.35;
+    const lLen = Math.sqrt(lx * lx + ly * ly + lz * lz);
+    const lnx = lx / lLen, lny = ly / lLen, lnz = lz / lLen;
+
+    // Fill light from opposite side (subtle)
+    const flx = -lx * 0.3, fly = -ly * 0.3, flz = 0.6;
+    const flLen = Math.sqrt(flx * flx + fly * fly + flz * flz);
+    const fnx = flx / flLen, fny = fly / flLen, fnz = flz / flLen;
+
+    // Draw square dither dots
+    for (let gy = 0; gy < canvas.height; gy += cellSize) {
+      for (let gx = 0; gx < canvas.width; gx += cellSize) {
+        const dotCx = gx + cellSize / 2;
+        const dotCy = gy + cellSize / 2;
+
+        // Normalized position (-1 to 1)
+        const dx = (dotCx - cx) / radius;
+        const dy = (dotCy - cy) / radius;
+        const r2 = dx * dx + dy * dy;
+        if (r2 > 1) continue;
+
+        // 3D sphere surface normal
+        const nx = dx;
+        const ny = dy;
+        const nz = Math.sqrt(1 - r2);
+
+        // --- Key light (wrapped Lambert — light bleeds past the equator) ---
+        const NdotL = nx * lnx + ny * lny + nz * lnz;
+        const wrap = 0.4; // wider gradient for smoother falloff
+        const lambert = Math.max(0, (NdotL + wrap) / (1 + wrap));
+        // Ease into black smoothly
+        const lambertSmooth = lambert * lambert;
+
+        // --- Specular (softer, broader) ---
+        const hx = lnx, hy = lny, hz = lnz + 1;
+        const hLen = Math.sqrt(hx * hx + hy * hy + hz * hz);
+        const NdotH = (nx * hx + ny * hy + nz * hz) / hLen;
+        const spec = Math.pow(Math.max(0, NdotH), 8) * 0.25;
+
+        // --- Fill light (off) ---
+        const fillLambert = 0;
+
+        // --- Fresnel rim light (disabled so shadow stays black) ---
+        const fresnel = 0;
+
+        // --- Combine all lighting ---
+        const raw = lambertSmooth * 1.3 + spec;
+        const value = Math.max(0, Math.min(1, raw));
+
+        // How much specular pushes toward white (gentle)
+        const specIntensity = Math.pow(Math.max(0, NdotH), 8);
+
+        // 8x8 Bayer threshold
+        const ix = Math.floor(gx / cellSize) % 8;
+        const iy = Math.floor(gy / cellSize) % 8;
+        const threshold = (BAYER8[iy][ix] + 0.5) / 64;
+
+        if (value > threshold) {
+          // All dots are the full bright color — dither density handles shading
+          let cr = color.bright[0];
+          let cg = color.bright[1];
+          let cb = color.bright[2];
+
+          // Specular highlight — subtle white tint
+          const w = Math.min(0.4, specIntensity * 0.5);
+          cr = cr + (255 - cr) * w;
+          cg = cg + (255 - cg) * w;
+          cb = cb + (255 - cb) * w;
+
+          ctx.fillStyle = `rgb(${Math.round(cr)},${Math.round(cg)},${Math.round(cb)})`;
+          ctx.fillRect(gx, gy, dotSize, dotSize);
+        }
+      }
+    }
+
+    ctx.restore();
+    requestAnimationFrame(render);
+  }
+
+  render();
+  return canvas;
+}
+
+// Build the grid
+const grid = document.getElementById('grid');
+COLORS.forEach(color => {
+  const swatch = document.createElement('div');
+  swatch.className = 'swatch';
+  createDitherCircle(80, color, swatch);
+  const label = document.createElement('span');
+  label.textContent = color.name;
+  swatch.appendChild(label);
+  grid.appendChild(swatch);
+});
+
+// Build size variants
+const sizesRow = document.getElementById('sizes');
+[12, 16, 20, 24, 32].forEach(sz => {
+  const swatch = document.createElement('div');
+  swatch.className = 'swatch';
+  createDitherCircle(sz, COLORS[1], swatch); // violet
+  const label = document.createElement('span');
+  label.textContent = sz + 'px';
+  swatch.appendChild(label);
+  sizesRow.appendChild(swatch);
+});
+</script>
+</body>
+</html>

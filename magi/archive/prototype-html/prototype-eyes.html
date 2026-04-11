@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Cartoon Eyes</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #09090b;
+    color: #fafafa;
+    font-family: system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 48px;
+  }
+
+  .size-label {
+    font-size: 12px;
+    color: #71717a;
+    margin-bottom: 6px;
+    text-align: center;
+  }
+
+  .variant {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .eyes {
+    display: flex;
+    align-items: center;
+  }
+
+  .eye {
+    background: #ffffff;
+    border-radius: 50%;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .pupil {
+    background: #000000;
+    border-radius: 50%;
+    position: absolute;
+    pointer-events: none;
+  }
+
+
+  .row {
+    display: flex;
+    gap: 64px;
+    align-items: flex-end;
+  }
+</style>
+</head>
+<body>
+
+<div class="row">
+  <div class="variant" id="v24">
+    <div class="size-label">24px</div>
+    <div class="eyes" data-size="24"></div>
+  </div>
+  <div class="variant" id="v32">
+    <div class="size-label">32px</div>
+    <div class="eyes" data-size="32"></div>
+  </div>
+  <div class="variant" id="v48">
+    <div class="size-label">48px</div>
+    <div class="eyes" data-size="48"></div>
+  </div>
+  <div class="variant" id="v64">
+    <div class="size-label">64px</div>
+    <div class="eyes" data-size="64"></div>
+  </div>
+  <div class="variant" id="v128">
+    <div class="size-label">128px</div>
+    <div class="eyes" data-size="128"></div>
+  </div>
+</div>
+
+<script>
+  // Proportions relative to the overall "size" (= eye height)
+  // Big round cartoon eyes like the reference
+  const EYE_WIDTH_RATIO = 0.85;  // nearly circular, slightly taller
+  const GAP_RATIO = 0.1;         // eyes close together
+  const PUPIL_RATIO = 0.35;      // small pupil relative to big eye
+  const allEyes = [];
+
+  document.querySelectorAll('.eyes').forEach(container => {
+    const size = Number(container.dataset.size);
+    const eyeH = size;
+    const eyeW = size * EYE_WIDTH_RATIO;
+    const gap = size * GAP_RATIO;
+    const pupilD = size * PUPIL_RATIO;
+
+    container.style.gap = gap + 'px';
+
+    for (let i = 0; i < 2; i++) {
+      const eye = document.createElement('div');
+      eye.className = 'eye';
+      eye.style.width = eyeW + 'px';
+      eye.style.height = eyeH + 'px';
+      // Make it an oval via border-radius percentage
+      eye.style.borderRadius = '50%';
+
+      const pupil = document.createElement('div');
+      pupil.className = 'pupil';
+      pupil.style.width = pupilD + 'px';
+      pupil.style.height = pupilD + 'px';
+
+      eye.appendChild(pupil);
+      container.appendChild(eye);
+
+      allEyes.push({ eye, pupil, eyeW, eyeH, pupilD });
+    }
+  });
+
+  // Position pupils at bottom-center initially (resting position)
+  allEyes.forEach(({ pupil, eyeW, eyeH, pupilD }) => {
+    pupil.style.left = (eyeW - pupilD) / 2 + 'px';
+    pupil.style.top = (eyeH - pupilD) * 0.7 + 'px';
+  });
+
+  let mouseX = window.innerWidth / 2;
+  let mouseY = window.innerHeight + 200; // default: looking down
+
+  document.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+
+  function animate() {
+    allEyes.forEach(({ eye, pupil, eyeW, eyeH, pupilD }) => {
+      const rect = eye.getBoundingClientRect();
+      const eyeCX = rect.left + eyeW / 2;
+      const eyeCY = rect.top + eyeH / 2;
+
+      const dx = mouseX - eyeCX;
+      const dy = mouseY - eyeCY;
+      const angle = Math.atan2(dy, dx);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // Max travel for pupil center from eye center
+      const maxTravelX = (eyeW - pupilD) / 2 * 0.75;
+      const maxTravelY = (eyeH - pupilD) / 2 * 0.75;
+
+      // Normalize direction onto the ellipse boundary, then scale by distance
+      const ellipseRadius = Math.sqrt(
+        (maxTravelX * Math.cos(angle)) ** 2 +
+        (maxTravelY * Math.sin(angle)) ** 2
+      );
+      // How far along the max travel (use a soft clamp)
+      const t = Math.min(1, dist / 200);
+      const offsetX = maxTravelX * Math.cos(angle) * t;
+      const offsetY = maxTravelY * Math.sin(angle) * t;
+
+      const px = (eyeW - pupilD) / 2 + offsetX;
+      const py = (eyeH - pupilD) / 2 + offsetY;
+
+      pupil.style.left = px + 'px';
+      pupil.style.top = py + 'px';
+    });
+
+    requestAnimationFrame(animate);
+  }
+
+  animate();
+</script>
+</body>
+</html>

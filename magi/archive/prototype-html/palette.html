@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Outcome AI — Color Palette</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; min-height: 100vh; }
+  .panel { flex: 1; padding: 48px 40px; }
+  .panel.dark { background: #131210; color: #F5EDDA; }
+  .panel.light { background: #F5EDDA; color: #2C2416; }
+  h2 { font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 24px; opacity: 0.5; }
+  .group { margin-bottom: 32px; }
+  .group-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.4; margin-bottom: 8px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+  .swatch { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; border: 1px solid rgba(128,128,128,0.2); }
+  .label { font-size: 13px; flex: 1; }
+  .hex { font-size: 12px; font-family: monospace; opacity: 0.5; }
+  .divider { border: none; border-top: 1px solid rgba(128,128,128,0.15); margin: 24px 0; }
+</style>
+</head>
+<body>
+
+<div class="panel dark">
+  <h2>Dark Mode</h2>
+
+  <div class="group">
+    <div class="group-label">Base</div>
+    <div class="row"><div class="swatch" style="background:#131210"></div><div class="label">background</div><div class="hex">#131210</div></div>
+    <div class="row"><div class="swatch" style="background:#F5EDDA"></div><div class="label">foreground</div><div class="hex">#F5EDDA</div></div>
+    <div class="row"><div class="swatch" style="background:#0E0D0B"></div><div class="label">muted</div><div class="hex">#0E0D0B</div></div>
+    <div class="row"><div class="swatch" style="background:#8C7E6A"></div><div class="label">muted-foreground</div><div class="hex">#8C7E6A</div></div>
+    <div class="row"><div class="swatch" style="background:#2E2B25"></div><div class="label">border</div><div class="hex">#2E2B25</div></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="group">
+    <div class="group-label">Sidebar</div>
+    <div class="row"><div class="swatch" style="background:#0E0D0B"></div><div class="label">sidebar</div><div class="hex">#0E0D0B</div></div>
+    <div class="row"><div class="swatch" style="background:#F5EDDA"></div><div class="label">sidebar-foreground</div><div class="hex">#F5EDDA</div></div>
+    <div class="row"><div class="swatch" style="background:#2E2B25"></div><div class="label">sidebar-border</div><div class="hex">#2E2B25</div></div>
+    <div class="row"><div class="swatch" style="background:#1A1916"></div><div class="label">sidebar-accent</div><div class="hex">#1A1916</div></div>
+    <div class="row"><div class="swatch" style="background:#F5EDDA"></div><div class="label">sidebar-accent-foreground</div><div class="hex">#F5EDDA</div></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="group">
+    <div class="group-label">Accent</div>
+    <div class="row"><div class="swatch" style="background:#1A1916"></div><div class="label">accent</div><div class="hex">#1A1916</div></div>
+    <div class="row"><div class="swatch" style="background:#F5EDDA"></div><div class="label">accent-foreground</div><div class="hex">#F5EDDA</div></div>
+    <div class="row"><div class="swatch" style="background:#E8863A"></div><div class="label">primary</div><div class="hex">#E8863A</div></div>
+    <div class="row"><div class="swatch" style="background:#1A1916"></div><div class="label">primary-foreground</div><div class="hex">#1A1916</div></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="group">
+    <div class="group-label">Special</div>
+    <div class="row"><div class="swatch" style="background:#5B8FB9"></div><div class="label">ai</div><div class="hex">#5B8FB9</div></div>
+    <div class="row"><div class="swatch" style="background:#1A1916"></div><div class="label">input-surface</div><div class="hex">#1A1916</div></div>
+  </div>
+</div>
+
+<div class="panel light">
+  <h2>Light Mode</h2>
+
+  <div class="group">
+    <div class="group-label">Base</div>
+    <div class="row"><div class="swatch" style="background:#F5EDDA"></div><div class="label">background</div><div class="hex">#F5EDDA</div></div>
+    <div class="row"><div class="swatch" style="background:#2C2416"></div><div class="label">foreground</div><div class="hex">#2C2416</div></div>
+    <div class="row"><div class="swatch" style="background:#EDE4CF"></div><div class="label">muted</div><div class="hex">#EDE4CF</div></div>
+    <div class="row"><div class="swatch" style="background:#8C7E6A"></div><div class="label">muted-foreground</div><div class="hex">#8C7E6A</div></div>
+    <div class="row"><div class="swatch" style="background:#DDD4C0"></div><div class="label">border</div><div class="hex">#DDD4C0</div></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="group">
+    <div class="group-label">Sidebar</div>
+    <div class="row"><div class="swatch" style="background:#EEE5D1"></div><div class="label">sidebar</div><div class="hex">#EEE5D1</div></div>
+    <div class="row"><div class="swatch" style="background:#2C2416"></div><div class="label">sidebar-foreground</div><div class="hex">#2C2416</div></div>
+    <div class="row"><div class="swatch" style="background:#DDD4C0"></div><div class="label">sidebar-border</div><div class="hex">#DDD4C0</div></div>
+    <div class="row"><div class="swatch" style="background:#E3D9C2"></div><div class="label">sidebar-accent</div><div class="hex">#E3D9C2</div></div>
+    <div class="row"><div class="swatch" style="background:#2C2416"></div><div class="label">sidebar-accent-foreground</div><div class="hex">#2C2416</div></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="group">
+    <div class="group-label">Accent</div>
+    <div class="row"><div class="swatch" style="background:#E3D9C2"></div><div class="label">accent</div><div class="hex">#E3D9C2</div></div>
+    <div class="row"><div class="swatch" style="background:#2C2416"></div><div class="label">accent-foreground</div><div class="hex">#2C2416</div></div>
+    <div class="row"><div class="swatch" style="background:#D47530"></div><div class="label">primary</div><div class="hex">#D47530</div></div>
+    <div class="row"><div class="swatch" style="background:#FFFFFF"></div><div class="label">primary-foreground</div><div class="hex">#FFFFFF</div></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="group">
+    <div class="group-label">Special</div>
+    <div class="row"><div class="swatch" style="background:#4A7A9E"></div><div class="label">ai</div><div class="hex">#4A7A9E</div></div>
+    <div class="row"><div class="swatch" style="background:#F9F4E8"></div><div class="label">input-surface</div><div class="hex">#F9F4E8</div></div>
+  </div>
+</div>
+
+</body>
+</html>

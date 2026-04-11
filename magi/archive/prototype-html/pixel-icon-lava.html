@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Idle Animations — Orange + Blue</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px;
+    gap: 28px;
+  }
+  h2 { margin: 0; font-size: 18px; color: #aaa; font-weight: 500; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+    width: 100%;
+    max-width: 1600px;
+  }
+  .card {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: opacity 0.2s;
+  }
+  .card.paused { opacity: 0.45; }
+  .card.paused:hover { opacity: 0.7; }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card-header h3 { margin: 0; font-size: 14px; color: #ccc; font-weight: 500; }
+  .card p { margin: 0; font-size: 11px; color: #555; line-height: 1.4; }
+  .previews { display: flex; gap: 10px; align-items: flex-end; }
+  .previews .dark-bg, .previews .light-bg {
+    display: flex; gap: 10px; align-items: flex-end; padding: 8px; border-radius: 8px;
+  }
+  .previews .dark-bg { background: #0a0a0a; }
+  .previews .light-bg { background: #f0efed; }
+  .prev-item { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .prev-item label { font-size: 9px; color: #444; }
+  .controls-row {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  .controls-row label {
+    font-size: 11px; color: #555; display: flex; align-items: center; gap: 4px;
+  }
+  .controls-row input[type="range"] { width: 60px; height: 14px; }
+  .btn {
+    background: #1a1a1a; color: #888; border: 1px solid #2a2a2a;
+    padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 11px;
+    transition: all 0.15s;
+  }
+  .btn:hover { background: #252525; color: #ccc; }
+  .btn.playing { background: #1a2a3a; color: #6af; border-color: #2a3a5a; }
+  .btn.copied { background: #1a3a1a; color: #6c6; border-color: #2a4a2a; }
+  .val { font-size: 10px; color: #444; min-width: 24px; }
+  .btn-group { display: flex; gap: 5px; }
+</style>
+</head>
+<body>
+
+<h2>Idle Icon — Orange &amp; Blue Variations</h2>
+<div class="grid" id="cards"></div>
+
+<script>
+const DPR = window.devicePixelRatio || 1;
+const GRID = 7;
+const CENTER = 3;
+const SIZES_DARK = [16, 20, 48, 120];
+const SIZES_LIGHT = [16, 20, 48];
+
+const COL_A = { r: 232, g: 134, b: 58 };  // orange #E8863A
+const COL_B = { r: 91, g: 143, b: 185 };  // blue #5B8FB9
+
+function makeCanvas(container, size) {
+  const c = document.createElement("canvas");
+  c.width = size * DPR;
+  c.height = size * DPR;
+  c.style.width = size + "px";
+  c.style.height = size + "px";
+  container.appendChild(c);
+  return c;
+}
+
+function col(color, brightness) { return { ...color, brightness }; }
+
+function pickColor(mix) {
+  return mix > 0.5 ? COL_B : COL_A;
+}
+
+function blendColor(mix) {
+  return {
+    r: Math.round(COL_A.r * (1 - mix) + COL_B.r * mix),
+    g: Math.round(COL_A.g * (1 - mix) + COL_B.g * mix),
+    b: Math.round(COL_A.b * (1 - mix) + COL_B.b * mix),
+  };
+}
+
+function drawLED(ctx, canvasSize, cells, isDark) {
+  const s = canvasSize * DPR;
+  ctx.clearRect(0, 0, s, s);
+  const gapRatio = 0.18;
+  const cellSize = s / (GRID + (GRID - 1) * gapRatio);
+  const gap = cellSize * gapRatio;
+  const total = GRID * cellSize + (GRID - 1) * gap;
+  const off = (s - total) / 2;
+  const rad = cellSize * 0.28;
+
+  if (isDark) {
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const st = cells.get(gx+","+gy);
+        if (!st || st.brightness < 0.05) continue;
+        const px = off + gx*(cellSize+gap)+cellSize/2;
+        const py = off + gy*(cellSize+gap)+cellSize/2;
+        const glowR = cellSize * 2.2;
+        const alpha = st.brightness * 0.35;
+        const grad = ctx.createRadialGradient(px,py,0,px,py,glowR);
+        grad.addColorStop(0, `rgba(${st.r},${st.g},${st.b},${alpha})`);
+        grad.addColorStop(0.5, `rgba(${st.r},${st.g},${st.b},${alpha*0.3})`);
+        grad.addColorStop(1, `rgba(${st.r},${st.g},${st.b},0)`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(px-glowR,py-glowR,glowR*2,glowR*2);
+      }
+    }
+  }
+  for (let gy = 0; gy < GRID; gy++) {
+    for (let gx = 0; gx < GRID; gx++) {
+      const px = off+gx*(cellSize+gap);
+      const py = off+gy*(cellSize+gap);
+      const st = cells.get(gx+","+gy);
+      const br = st ? st.brightness : 0;
+      if (br > 0.03 && st) {
+        ctx.beginPath();
+        ctx.roundRect(px,py,cellSize,cellSize,rad);
+        if (isDark) {
+          ctx.fillStyle = `rgb(${Math.round(st.r*(0.3+0.7*br))},${Math.round(st.g*(0.3+0.7*br))},${Math.round(st.b*(0.3+0.7*br))})`;
+        } else {
+          ctx.fillStyle = `rgba(${st.r},${st.g},${st.b},${0.3+br*0.7})`;
+        }
+        ctx.fill();
+        if (isDark && br > 0.4) {
+          const hx=px+cellSize/2, hy=py+cellSize/2;
+          const hGrad = ctx.createRadialGradient(hx,hy,0,hx,hy,cellSize*0.35);
+          hGrad.addColorStop(0, `rgba(255,255,230,${br*0.5})`);
+          hGrad.addColorStop(1, `rgba(255,255,230,0)`);
+          ctx.fillStyle = hGrad;
+          ctx.beginPath();
+          ctx.roundRect(px,py,cellSize,cellSize,rad);
+          ctx.fill();
+        }
+      }
+    }
+  }
+}
+
+// ============================================================
+// ANIMATION DEFINITIONS
+// ============================================================
+const ANIM_DEFS = {
+
+"Plasma Sharp": {
+  desc: "Classic plasma with hard orange/blue boundaries",
+  params: {
+    speed:     { min: 0.05, max: 1, step: 0.05, default: 0.3 },
+    softness:  { min: 0.5, max: 3, step: 0.1, default: 1.5 },
+    sharpness: { min: 1, max: 12, step: 0.5, default: 5 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const v1 = Math.sin(gx*p.softness*0.6 + t*p.speed);
+        const v2 = Math.sin(gy*p.softness*0.5 + t*p.speed*1.3);
+        const v3 = Math.sin((gx+gy)*p.softness*0.35 + t*p.speed*0.7);
+        const v4 = Math.sin(Math.sqrt((gx-3)**2+(gy-3)**2)*p.softness*0.8 - t*p.speed*0.9);
+        const br = ((v1+v2+v3+v4)/4+1)/2;
+        if (br < 0.1) continue;
+        const c1 = Math.sin(gx*0.9+t*p.speed*0.5+1);
+        const c2 = Math.sin(gy*0.7+t*p.speed*0.6+2);
+        const c3 = Math.sin((gx-gy)*0.6+t*p.speed*0.4);
+        const mix = 1/(1+Math.exp(-(c1+c2+c3)/3*p.sharpness));
+        const c = mix > 0.5 ? COL_B : COL_A;
+        cells.set(gx+","+gy, { brightness: br*0.9, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Plasma Sharp — speed: ${p.speed}, softness: ${p.softness}, sharpness: ${p.sharpness}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+for (let gy = 0; gy < 7; gy++) {
+  for (let gx = 0; gx < 7; gx++) {
+    const v1 = Math.sin(gx*${p.softness}*0.6+t*${p.speed});
+    const v2 = Math.sin(gy*${p.softness}*0.5+t*${p.speed}*1.3);
+    const v3 = Math.sin((gx+gy)*${p.softness}*0.35+t*${p.speed}*0.7);
+    const v4 = Math.sin(Math.sqrt((gx-3)**2+(gy-3)**2)*${p.softness}*0.8-t*${p.speed}*0.9);
+    const br = ((v1+v2+v3+v4)/4+1)/2;
+    if (br < 0.1) continue;
+    const c1 = Math.sin(gx*0.9+t*${p.speed}*0.5+1);
+    const c2 = Math.sin(gy*0.7+t*${p.speed}*0.6+2);
+    const c3 = Math.sin((gx-gy)*0.6+t*${p.speed}*0.4);
+    const mix = 1/(1+Math.exp(-(c1+c2+c3)/3*${p.sharpness}));
+    const col = mix > 0.5 ? COL_B : COL_A;
+    setCell(gx, gy, br*0.9, col.r, col.g, col.b);
+  }
+}`;
+  },
+},
+
+"Plasma Soft": {
+  desc: "Gentle plasma with smooth color gradients between orange and blue",
+  params: {
+    speed:    { min: 0.05, max: 1, step: 0.05, default: 0.2 },
+    softness: { min: 0.5, max: 3, step: 0.1, default: 1.2 },
+    contrast: { min: 0.3, max: 1, step: 0.05, default: 0.7 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const v1 = Math.sin(gx*p.softness*0.6+t*p.speed);
+        const v2 = Math.sin(gy*p.softness*0.5+t*p.speed*1.3);
+        const v3 = Math.sin((gx+gy)*p.softness*0.35+t*p.speed*0.7);
+        const v4 = Math.sin(Math.sqrt((gx-3)**2+(gy-3)**2)*p.softness*0.8-t*p.speed*0.9);
+        const br = ((v1+v2+v3+v4)/4+1)/2 * p.contrast + (1-p.contrast)*0.3;
+        if (br < 0.08) continue;
+        const c1 = Math.sin(gx*0.9+t*p.speed*0.5+1);
+        const c2 = Math.sin(gy*0.7+t*p.speed*0.6+2);
+        const c3 = Math.sin((gx-gy)*0.6+t*p.speed*0.4);
+        const mix = ((c1+c2+c3)/3+1)/2;
+        const c = blendColor(mix);
+        cells.set(gx+","+gy, { brightness: br*0.9, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Plasma Soft — speed: ${p.speed}, softness: ${p.softness}, contrast: ${p.contrast}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+for (let gy = 0; gy < 7; gy++) {
+  for (let gx = 0; gx < 7; gx++) {
+    const v1 = Math.sin(gx*${p.softness}*0.6+t*${p.speed});
+    const v2 = Math.sin(gy*${p.softness}*0.5+t*${p.speed}*1.3);
+    const v3 = Math.sin((gx+gy)*${p.softness}*0.35+t*${p.speed}*0.7);
+    const v4 = Math.sin(Math.sqrt((gx-3)**2+(gy-3)**2)*${p.softness}*0.8-t*${p.speed}*0.9);
+    const br = ((v1+v2+v3+v4)/4+1)/2*${p.contrast}+${(1-p.contrast)*0.3};
+    if (br < 0.08) continue;
+    const mix = ((Math.sin(gx*0.9+t*${p.speed}*0.5+1)+Math.sin(gy*0.7+t*${p.speed}*0.6+2)+Math.sin((gx-gy)*0.6+t*${p.speed}*0.4))/3+1)/2;
+    const col = { r: Math.round(COL_A.r*(1-mix)+COL_B.r*mix), g: Math.round(COL_A.g*(1-mix)+COL_B.g*mix), b: Math.round(COL_A.b*(1-mix)+COL_B.b*mix) };
+    setCell(gx, gy, br*0.9, col.r, col.g, col.b);
+  }
+}`;
+  },
+},
+
+"Lava Blobs": {
+  desc: "Two metaball blobs wander — one orange, one blue — with sharp color",
+  params: {
+    speed:    { min: 0.1, max: 1, step: 0.05, default: 0.3 },
+    softness: { min: 0.8, max: 3, step: 0.1, default: 1.6 },
+    size:     { min: 0.5, max: 2, step: 0.1, default: 1.2 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const s = p.speed;
+    const ax = CENTER+Math.sin(t*s*0.7)*2.2+Math.sin(t*s*1.3)*0.5;
+    const ay = CENTER+Math.cos(t*s*0.9)*2+Math.sin(t*s*0.5)*0.8;
+    const bx = CENTER+Math.sin(t*s*0.6+2.5)*2+Math.cos(t*s*1.1)*0.6;
+    const by = CENTER+Math.cos(t*s*0.8+1.8)*2.2+Math.sin(t*s*0.7+1)*0.5;
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const dA = Math.sqrt((gx-ax)**2+(gy-ay)**2);
+        const dB = Math.sqrt((gx-bx)**2+(gy-by)**2);
+        const sz = p.softness * p.size;
+        const fA = 1/(1+dA*dA/(sz*sz));
+        const fB = 1/(1+dB*dB/(sz*sz));
+        const total = fA + fB;
+        if (total < 0.12) continue;
+        const br = Math.min(1, total * 0.9);
+        const c = fA > fB ? COL_A : COL_B;
+        cells.set(gx+","+gy, { brightness: br, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Lava Blobs — speed: ${p.speed}, softness: ${p.softness}, size: ${p.size}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+const s = ${p.speed};
+const ax = 3+Math.sin(t*s*0.7)*2.2+Math.sin(t*s*1.3)*0.5;
+const ay = 3+Math.cos(t*s*0.9)*2+Math.sin(t*s*0.5)*0.8;
+const bx = 3+Math.sin(t*s*0.6+2.5)*2+Math.cos(t*s*1.1)*0.6;
+const by = 3+Math.cos(t*s*0.8+1.8)*2.2+Math.sin(t*s*0.7+1)*0.5;
+const sz = ${p.softness} * ${p.size};
+for (let gy = 0; gy < 7; gy++) {
+  for (let gx = 0; gx < 7; gx++) {
+    const dA = Math.sqrt((gx-ax)**2+(gy-ay)**2);
+    const dB = Math.sqrt((gx-bx)**2+(gy-by)**2);
+    const fA = 1/(1+dA*dA/(sz*sz));
+    const fB = 1/(1+dB*dB/(sz*sz));
+    const total = fA+fB;
+    if (total < 0.12) continue;
+    const col = fA > fB ? COL_A : COL_B;
+    setCell(gx, gy, Math.min(1,total*0.9), col.r, col.g, col.b);
+  }
+}`;
+  },
+},
+
+"Tidal": {
+  desc: "Orange and blue tide waves wash across from opposite sides",
+  params: {
+    speed: { min: 0.1, max: 1, step: 0.05, default: 0.35 },
+    freq:  { min: 0.3, max: 2, step: 0.1, default: 0.8 },
+    depth: { min: 0.3, max: 1, step: 0.05, default: 0.7 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const waveA = Math.sin(gx*p.freq - t*p.speed*2 + gy*0.3);
+        const waveB = Math.sin((GRID-1-gx)*p.freq - t*p.speed*2.3 + (GRID-1-gy)*0.25 + 1.5);
+        const brA = Math.max(0, waveA) * p.depth;
+        const brB = Math.max(0, waveB) * p.depth;
+        if (brA < 0.05 && brB < 0.05) continue;
+        const c = brA > brB ? COL_A : COL_B;
+        const br = Math.max(brA, brB);
+        cells.set(gx+","+gy, { brightness: br * 0.9, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Tidal — speed: ${p.speed}, freq: ${p.freq}, depth: ${p.depth}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+for (let gy = 0; gy < 7; gy++) {
+  for (let gx = 0; gx < 7; gx++) {
+    const wA = Math.sin(gx*${p.freq}-t*${p.speed}*2+gy*0.3);
+    const wB = Math.sin((6-gx)*${p.freq}-t*${p.speed}*2.3+(6-gy)*0.25+1.5);
+    const brA = Math.max(0, wA)*${p.depth};
+    const brB = Math.max(0, wB)*${p.depth};
+    if (brA < 0.05 && brB < 0.05) continue;
+    const col = brA > brB ? COL_A : COL_B;
+    setCell(gx, gy, Math.max(brA, brB)*0.9, col.r, col.g, col.b);
+  }
+}`;
+  },
+},
+
+"Split Breathe": {
+  desc: "Diamond breathes from center — top half orange, bottom half blue",
+  params: {
+    speed: { min: 0.1, max: 1, step: 0.05, default: 0.25 },
+    size:  { min: 1.5, max: 4, step: 0.1, default: 3.2 },
+    min:   { min: 0, max: 2, step: 0.1, default: 0.5 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const phase = (Math.sin(t*p.speed)+1)/2;
+    const radius = p.min + phase*p.size;
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const dist = Math.abs(gx-CENTER)+Math.abs(gy-CENTER);
+        if (dist > radius+0.5) continue;
+        const edge = radius-dist;
+        const br = Math.min(1, Math.max(0, edge+0.5))*(0.4+0.6*(1-dist/(p.size+1)));
+        if (br < 0.02) continue;
+        const c = gy < CENTER ? COL_A : gy > CENTER ? COL_B : (gx <= CENTER ? COL_A : COL_B);
+        cells.set(gx+","+gy, { brightness: br, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Split Breathe — speed: ${p.speed}, size: ${p.size}, min: ${p.min}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+const phase = (Math.sin(t*${p.speed})+1)/2;
+const radius = ${p.min} + phase*${p.size};
+for (let gy = 0; gy < 7; gy++) {
+  for (let gx = 0; gx < 7; gx++) {
+    const dist = Math.abs(gx-3)+Math.abs(gy-3);
+    if (dist > radius+0.5) continue;
+    const br = Math.min(1,Math.max(0,radius-dist+0.5))*(0.4+0.6*(1-dist/${(p.size+1).toFixed(1)}));
+    if (br < 0.02) continue;
+    const col = gy < 3 ? COL_A : gy > 3 ? COL_B : (gx <= 3 ? COL_A : COL_B);
+    setCell(gx, gy, br, col.r, col.g, col.b);
+  }
+}`;
+  },
+},
+
+"Dual Orbit": {
+  desc: "Orange and blue dots orbit center in opposite directions",
+  params: {
+    speed:  { min: 0.3, max: 3, step: 0.1, default: 1.2 },
+    radius: { min: 1, max: 3, step: 0.1, default: 2.3 },
+    glow:   { min: 0.5, max: 2, step: 0.1, default: 1.3 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    cells.set(CENTER+","+CENTER, col(blendColor(0.5), 0.2));
+    const dots = [
+      { angle: t*p.speed, color: COL_A },
+      { angle: -t*p.speed + Math.PI, color: COL_B },
+    ];
+    for (const dot of dots) {
+      const fx = CENTER+Math.cos(dot.angle)*p.radius;
+      const fy = CENTER+Math.sin(dot.angle)*p.radius;
+      for (let gy = 0; gy < GRID; gy++) {
+        for (let gx = 0; gx < GRID; gx++) {
+          const dist = Math.sqrt((gx-fx)**2+(gy-fy)**2);
+          if (dist > p.glow+1) continue;
+          const br = Math.max(0, 1-dist/p.glow)*0.95;
+          if (br < 0.03) continue;
+          const key = gx+","+gy;
+          const ex = cells.get(key);
+          if (!ex || ex.brightness < br) cells.set(key, { brightness: br, r: dot.color.r, g: dot.color.g, b: dot.color.b });
+        }
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Dual Orbit — speed: ${p.speed}, radius: ${p.radius}, glow: ${p.glow}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+setCell(3, 3, 0.2, 162, 139, 122);
+const dots = [{angle:t*${p.speed},color:COL_A},{angle:-t*${p.speed}+Math.PI,color:COL_B}];
+for (const dot of dots) {
+  const fx=3+Math.cos(dot.angle)*${p.radius}, fy=3+Math.sin(dot.angle)*${p.radius};
+  for (let gy=0;gy<7;gy++) for (let gx=0;gx<7;gx++) {
+    const dist=Math.sqrt((gx-fx)**2+(gy-fy)**2);
+    if (dist>${p.glow}+1) continue;
+    setCell(gx, gy, Math.max(0,1-dist/${p.glow})*0.95, dot.color.r, dot.color.g, dot.color.b);
+  }
+}`;
+  },
+},
+
+"Dual Spiral": {
+  desc: "Two interleaving spiral arms — one orange, one blue",
+  params: {
+    speed: { min: 0.3, max: 3, step: 0.1, default: 1 },
+    twist: { min: 0.3, max: 2, step: 0.1, default: 0.8 },
+    arms:  { min: 1, max: 3, step: 1, default: 2 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const dx = gx-CENTER, dy = gy-CENTER;
+        const dist = Math.sqrt(dx*dx+dy*dy);
+        if (dist < 0.3 || dist > 3.6) continue;
+        const angle = Math.atan2(dy, dx);
+        const wave = Math.sin(angle*p.arms - dist*p.twist + t*p.speed);
+        const br = Math.abs(wave) * (1-dist/4) * 0.9;
+        if (br < 0.04) continue;
+        const c = wave > 0 ? COL_A : COL_B;
+        cells.set(gx+","+gy, { brightness: br, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    cells.set(CENTER+","+CENTER, { brightness: 0.4, r: 162, g: 139, b: 122 });
+    return cells;
+  },
+  code(p) {
+    return `// Dual Spiral — speed: ${p.speed}, twist: ${p.twist}, arms: ${p.arms}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+for (let gy = 0; gy < 7; gy++) {
+  for (let gx = 0; gx < 7; gx++) {
+    const dx=gx-3,dy=gy-3,dist=Math.sqrt(dx*dx+dy*dy);
+    if (dist<0.3||dist>3.6) continue;
+    const wave = Math.sin(Math.atan2(dy,dx)*${p.arms}-dist*${p.twist}+t*${p.speed});
+    const br = Math.abs(wave)*(1-dist/4)*0.9;
+    if (br < 0.04) continue;
+    const col = wave > 0 ? COL_A : COL_B;
+    setCell(gx, gy, br, col.r, col.g, col.b);
+  }
+}
+setCell(3, 3, 0.4, 162, 139, 122);`;
+  },
+},
+
+"Checkerboard Shift": {
+  desc: "Alternating orange/blue checkerboard that slowly morphs and shifts",
+  params: {
+    speed: { min: 0.1, max: 1, step: 0.05, default: 0.3 },
+    scale: { min: 0.5, max: 3, step: 0.1, default: 1.5 },
+    pulse: { min: 0.2, max: 1, step: 0.05, default: 0.6 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const v = Math.sin(gx*p.scale + t*p.speed*2) * Math.sin(gy*p.scale + t*p.speed*1.7);
+        const br = (Math.abs(v)*0.6 + p.pulse*0.4) * 0.85;
+        if (br < 0.05) continue;
+        const c = v > 0 ? COL_A : COL_B;
+        cells.set(gx+","+gy, { brightness: br, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Checkerboard Shift — speed: ${p.speed}, scale: ${p.scale}, pulse: ${p.pulse}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+for (let gy = 0; gy < 7; gy++) {
+  for (let gx = 0; gx < 7; gx++) {
+    const v = Math.sin(gx*${p.scale}+t*${p.speed}*2)*Math.sin(gy*${p.scale}+t*${p.speed}*1.7);
+    const br = (Math.abs(v)*0.6+${p.pulse}*0.4)*0.85;
+    if (br < 0.05) continue;
+    const col = v > 0 ? COL_A : COL_B;
+    setCell(gx, gy, br, col.r, col.g, col.b);
+  }
+}`;
+  },
+},
+
+"Yin Yang": {
+  desc: "Slow rotating split — orange and blue halves rotate around center",
+  params: {
+    speed:  { min: 0.1, max: 1.5, step: 0.05, default: 0.4 },
+    fade:   { min: 0.2, max: 1, step: 0.05, default: 0.6 },
+    curve:  { min: 0, max: 1, step: 0.1, default: 0.4 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const angle = t * p.speed;
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const dx = gx-CENTER, dy = gy-CENTER;
+        const dist = Math.sqrt(dx*dx+dy*dy);
+        if (dist > 3.6) continue;
+        const a = Math.atan2(dy, dx) - angle + dist * p.curve * 0.3;
+        const side = Math.sin(a);
+        const br = (1 - dist/4.5) * (p.fade + (1-p.fade)*Math.abs(side));
+        if (br < 0.04) continue;
+        const c = side > 0 ? COL_A : COL_B;
+        cells.set(gx+","+gy, { brightness: br * 0.85, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Yin Yang — speed: ${p.speed}, fade: ${p.fade}, curve: ${p.curve}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+const angle = t * ${p.speed};
+for (let gy = 0; gy < 7; gy++) {
+  for (let gx = 0; gx < 7; gx++) {
+    const dx=gx-3,dy=gy-3,dist=Math.sqrt(dx*dx+dy*dy);
+    if (dist > 3.6) continue;
+    const a = Math.atan2(dy,dx) - angle + dist*${p.curve}*0.3;
+    const side = Math.sin(a);
+    const br = (1-dist/4.5)*(${p.fade}+${(1-p.fade).toFixed(2)}*Math.abs(side));
+    if (br < 0.04) continue;
+    const col = side > 0 ? COL_A : COL_B;
+    setCell(gx, gy, br*0.85, col.r, col.g, col.b);
+  }
+}`;
+  },
+},
+
+"Campfire": {
+  desc: "Orange flames below, blue smoke rising above",
+  params: {
+    speed: { min: 0.5, max: 4, step: 0.1, default: 2 },
+    split: { min: 2, max: 5, step: 0.5, default: 3.5 },
+    width: { min: 1, max: 3, step: 0.1, default: 2 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const centerDist = Math.abs(gx-CENTER);
+        const wFade = Math.max(0, 1-centerDist/p.width);
+        const flicker = (
+          Math.sin(gx*2.3+t*p.speed*2.1+gy*0.7)*0.3 +
+          Math.sin(gy*1.7-t*p.speed*3.2+gx*1.1)*0.3 +
+          Math.sin((gx+gy)*1.5+t*p.speed*1.7)*0.2 + 0.5
+        );
+        // Below split = orange fire, above = blue smoke
+        const fromBottom = GRID-1-gy;
+        const fireH = Math.max(0, 1-fromBottom/p.split);
+        const smokeH = Math.max(0, 1-(gy)/(GRID-p.split));
+        const fireBr = fireH * wFade * flicker;
+        const smokeBr = smokeH * wFade * flicker * 0.5;
+        if (fireBr > smokeBr && fireBr > 0.05) {
+          cells.set(gx+","+gy, { brightness: Math.min(1,fireBr), r: COL_A.r, g: COL_A.g, b: COL_A.b });
+        } else if (smokeBr > 0.05) {
+          cells.set(gx+","+gy, { brightness: Math.min(1,smokeBr), r: COL_B.r, g: COL_B.g, b: COL_B.b });
+        }
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Campfire — speed: ${p.speed}, split: ${p.split}, width: ${p.width}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+for (let gy=0;gy<7;gy++) for (let gx=0;gx<7;gx++) {
+  const wFade = Math.max(0,1-Math.abs(gx-3)/${p.width});
+  const flicker = Math.sin(gx*2.3+t*${p.speed}*2.1+gy*0.7)*0.3+Math.sin(gy*1.7-t*${p.speed}*3.2+gx*1.1)*0.3+Math.sin((gx+gy)*1.5+t*${p.speed}*1.7)*0.2+0.5;
+  const fireH = Math.max(0,1-(6-gy)/${p.split});
+  const smokeH = Math.max(0,1-gy/${(GRID-p.split).toFixed(1)})*0.5;
+  const fireBr = fireH*wFade*flicker, smokeBr = smokeH*wFade*flicker;
+  if (fireBr>smokeBr&&fireBr>0.05) setCell(gx,gy,fireBr,COL_A.r,COL_A.g,COL_A.b);
+  else if (smokeBr>0.05) setCell(gx,gy,smokeBr,COL_B.r,COL_B.g,COL_B.b);
+}`;
+  },
+},
+
+"Dual Ripple": {
+  desc: "Orange and blue ripples emanate from opposite corners",
+  params: {
+    speed:   { min: 0.5, max: 3, step: 0.1, default: 1.2 },
+    spacing: { min: 1, max: 4, step: 0.5, default: 2.5 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const dA = Math.sqrt(gx*gx+gy*gy);
+        const dB = Math.sqrt((gx-6)**2+(gy-6)**2);
+        const wA = Math.max(0, Math.sin((dA-t*p.speed)*Math.PI*2/p.spacing));
+        const wB = Math.max(0, Math.sin((dB-t*p.speed*1.1)*Math.PI*2/p.spacing));
+        if (wA < 0.05 && wB < 0.05) continue;
+        const c = wA > wB ? COL_A : COL_B;
+        const br = Math.max(wA, wB) * 0.85;
+        cells.set(gx+","+gy, { brightness: br, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Dual Ripple — speed: ${p.speed}, spacing: ${p.spacing}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+for (let gy=0;gy<7;gy++) for (let gx=0;gx<7;gx++) {
+  const dA=Math.sqrt(gx*gx+gy*gy);
+  const dB=Math.sqrt((gx-6)**2+(gy-6)**2);
+  const wA=Math.max(0,Math.sin((dA-t*${p.speed})*Math.PI*2/${p.spacing}));
+  const wB=Math.max(0,Math.sin((dB-t*${p.speed}*1.1)*Math.PI*2/${p.spacing}));
+  if (wA<0.05&&wB<0.05) continue;
+  const col=wA>wB?COL_A:COL_B;
+  setCell(gx,gy,Math.max(wA,wB)*0.85,col.r,col.g,col.b);
+}`;
+  },
+},
+
+"Aurora": {
+  desc: "Horizontal bands of orange and blue shimmer like northern lights",
+  params: {
+    speed: { min: 0.1, max: 1, step: 0.05, default: 0.3 },
+    waves: { min: 0.3, max: 2, step: 0.1, default: 0.8 },
+    drift: { min: 0.1, max: 1, step: 0.05, default: 0.4 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    for (let gy = 0; gy < GRID; gy++) {
+      for (let gx = 0; gx < GRID; gx++) {
+        const wave = Math.sin(gy*p.waves + t*p.speed + Math.sin(gx*0.5+t*p.drift)*0.8);
+        const shimmer = Math.sin(gx*1.3+gy*0.7+t*p.speed*3)*0.15 + 0.85;
+        const br = (wave+1)/2 * shimmer * 0.85;
+        if (br < 0.08) continue;
+        const colorWave = Math.sin(gy*0.6+t*p.speed*0.7+1.5);
+        const c = colorWave > 0 ? COL_A : COL_B;
+        cells.set(gx+","+gy, { brightness: br, r: c.r, g: c.g, b: c.b });
+      }
+    }
+    return cells;
+  },
+  code(p) {
+    return `// Aurora — speed: ${p.speed}, waves: ${p.waves}, drift: ${p.drift}
+const COL_A = { r: 232, g: 134, b: 58 };
+const COL_B = { r: 91, g: 143, b: 185 };
+for (let gy=0;gy<7;gy++) for (let gx=0;gx<7;gx++) {
+  const wave=Math.sin(gy*${p.waves}+t*${p.speed}+Math.sin(gx*0.5+t*${p.drift})*0.8);
+  const shimmer=Math.sin(gx*1.3+gy*0.7+t*${p.speed}*3)*0.15+0.85;
+  const br=(wave+1)/2*shimmer*0.85;
+  if (br<0.08) continue;
+  const col=Math.sin(gy*0.6+t*${p.speed}*0.7+1.5)>0?COL_A:COL_B;
+  setCell(gx,gy,br,col.r,col.g,col.b);
+}`;
+  },
+},
+
+};
+
+// ============================================================
+// BUILD UI
+// ============================================================
+const container = document.getElementById("cards");
+const cardStates = [];
+
+for (const [name, def] of Object.entries(ANIM_DEFS)) {
+  const state = {
+    name, def,
+    params: {},
+    canvasesDark: [],
+    canvasesLight: [],
+    playing: false,
+    cardEl: null,
+  };
+  for (const [k, v] of Object.entries(def.params)) state.params[k] = v.default;
+
+  const card = document.createElement("div");
+  card.className = "card paused";
+  state.cardEl = card;
+
+  // Header
+  const header = document.createElement("div");
+  header.className = "card-header";
+  const h3 = document.createElement("h3");
+  h3.textContent = name;
+  header.appendChild(h3);
+  const btnGroup = document.createElement("div");
+  btnGroup.className = "btn-group";
+  const playBtn = document.createElement("button");
+  playBtn.className = "btn";
+  playBtn.textContent = "\u25B6 Play";
+  playBtn.onclick = () => {
+    state.playing = !state.playing;
+    playBtn.textContent = state.playing ? "\u25A0 Stop" : "\u25B6 Play";
+    playBtn.classList.toggle("playing", state.playing);
+    card.classList.toggle("paused", !state.playing);
+  };
+  btnGroup.appendChild(playBtn);
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "btn";
+  copyBtn.textContent = "Copy";
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(def.code(state.params)).then(() => {
+      copyBtn.textContent = "Copied!";
+      copyBtn.classList.add("copied");
+      setTimeout(() => { copyBtn.textContent = "Copy"; copyBtn.classList.remove("copied"); }, 1500);
+    });
+  };
+  btnGroup.appendChild(copyBtn);
+  header.appendChild(btnGroup);
+  card.appendChild(header);
+
+  // Previews: dark + light
+  const previews = document.createElement("div");
+  previews.className = "previews";
+  const darkBg = document.createElement("div");
+  darkBg.className = "dark-bg";
+  for (const sz of SIZES_DARK) {
+    const item = document.createElement("div");
+    item.className = "prev-item";
+    const c = makeCanvas(item, sz);
+    const lbl = document.createElement("label");
+    lbl.textContent = sz + "px";
+    item.appendChild(lbl);
+    darkBg.appendChild(item);
+    state.canvasesDark.push({ canvas: c, size: sz });
+  }
+  previews.appendChild(darkBg);
+  const lightBg = document.createElement("div");
+  lightBg.className = "light-bg";
+  for (const sz of SIZES_LIGHT) {
+    const item = document.createElement("div");
+    item.className = "prev-item";
+    const c = makeCanvas(item, sz);
+    const lbl = document.createElement("label");
+    lbl.textContent = sz + "px";
+    item.appendChild(lbl);
+    lightBg.appendChild(item);
+    state.canvasesLight.push({ canvas: c, size: sz });
+  }
+  previews.appendChild(lightBg);
+  card.appendChild(previews);
+
+  // Controls
+  const controls = document.createElement("div");
+  controls.className = "controls-row";
+  for (const [pName, pDef] of Object.entries(def.params)) {
+    const label = document.createElement("label");
+    label.textContent = pName.charAt(0).toUpperCase()+pName.slice(1)+" ";
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = pDef.min; slider.max = pDef.max; slider.step = pDef.step; slider.value = pDef.default;
+    const valSpan = document.createElement("span");
+    valSpan.className = "val";
+    valSpan.textContent = pDef.default;
+    slider.oninput = () => { state.params[pName] = +slider.value; valSpan.textContent = slider.value; };
+    label.appendChild(slider);
+    label.appendChild(valSpan);
+    controls.appendChild(label);
+  }
+  card.appendChild(controls);
+
+  const desc = document.createElement("p");
+  desc.textContent = def.desc;
+  card.appendChild(desc);
+
+  container.appendChild(card);
+  cardStates.push(state);
+}
+
+// ============================================================
+// ANIMATE
+// ============================================================
+let lastTime = 0, elapsed = 0;
+function animate(time) {
+  if (!lastTime) lastTime = time;
+  const dt = Math.min(time - lastTime, 50) / 1000;
+  lastTime = time;
+  elapsed += dt;
+
+  for (const state of cardStates) {
+    if (!state.playing) continue;
+    const cells = state.def.fn(elapsed, state.params);
+    for (const { canvas, size } of state.canvasesDark) {
+      drawLED(canvas.getContext("2d"), size, cells, true);
+    }
+    for (const { canvas, size } of state.canvasesLight) {
+      drawLED(canvas.getContext("2d"), size, cells, false);
+    }
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

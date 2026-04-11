@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Face Animations — 7x7 LED</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px;
+    gap: 28px;
+  }
+  h2 { margin: 0; font-size: 18px; color: #aaa; font-weight: 500; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
+    width: 100%;
+    max-width: 1600px;
+  }
+  .card {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: opacity 0.2s;
+  }
+  .card.paused { opacity: 0.45; }
+  .card.paused:hover { opacity: 0.7; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; }
+  .card-header h3 { margin: 0; font-size: 14px; color: #ccc; font-weight: 500; }
+  .card p { margin: 0; font-size: 11px; color: #555; line-height: 1.4; }
+  .previews { display: flex; gap: 10px; align-items: flex-end; }
+  .previews .dark-bg, .previews .light-bg {
+    display: flex; gap: 10px; align-items: flex-end; padding: 8px; border-radius: 8px;
+  }
+  .previews .dark-bg { background: #0a0a0a; }
+  .previews .light-bg { background: #f0efed; }
+  .prev-item { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .prev-item label { font-size: 9px; color: #444; }
+  .controls-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .controls-row label { font-size: 11px; color: #555; display: flex; align-items: center; gap: 4px; }
+  .controls-row input[type="range"] { width: 60px; height: 14px; }
+  .btn {
+    background: #1a1a1a; color: #888; border: 1px solid #2a2a2a;
+    padding: 3px 10px; border-radius: 5px; cursor: pointer; font-size: 11px; transition: all 0.15s;
+  }
+  .btn:hover { background: #252525; color: #ccc; }
+  .btn.playing { background: #1a2a3a; color: #6af; border-color: #2a3a5a; }
+  .btn.copied { background: #1a3a1a; color: #6c6; border-color: #2a4a2a; }
+  .val { font-size: 10px; color: #444; min-width: 24px; }
+  .btn-group { display: flex; gap: 5px; }
+</style>
+</head>
+<body>
+
+<h2>Face Animations — 7x7 LED</h2>
+<div class="grid" id="cards"></div>
+
+<script>
+const DPR = window.devicePixelRatio || 1;
+const GRID = 7;
+const SIZES_DARK = [16, 20, 48, 120];
+const SIZES_LIGHT = [16, 20, 48];
+
+const COL_O = { r: 232, g: 134, b: 58 };  // orange
+const COL_B = { r: 91, g: 143, b: 185 };  // blue
+const COL_W = { r: 230, g: 225, b: 210 }; // warm white
+
+function makeCanvas(container, size) {
+  const c = document.createElement("canvas");
+  c.width = size * DPR; c.height = size * DPR;
+  c.style.width = size + "px"; c.style.height = size + "px";
+  container.appendChild(c);
+  return c;
+}
+
+function drawLED(ctx, canvasSize, cells, isDark) {
+  const s = canvasSize * DPR;
+  ctx.clearRect(0, 0, s, s);
+  const gapRatio = 0.18;
+  const cellSize = s / (GRID + (GRID - 1) * gapRatio);
+  const gap = cellSize * gapRatio;
+  const total = GRID * cellSize + (GRID - 1) * gap;
+  const off = (s - total) / 2;
+  const rad = cellSize * 0.28;
+
+  if (isDark) {
+    for (let gy = 0; gy < GRID; gy++) for (let gx = 0; gx < GRID; gx++) {
+      const st = cells.get(gx+","+gy);
+      if (!st || st.brightness < 0.05) continue;
+      const px = off+gx*(cellSize+gap)+cellSize/2, py = off+gy*(cellSize+gap)+cellSize/2;
+      const glowR = cellSize * 2.2, alpha = st.brightness * 0.35;
+      const grad = ctx.createRadialGradient(px,py,0,px,py,glowR);
+      grad.addColorStop(0, `rgba(${st.r},${st.g},${st.b},${alpha})`);
+      grad.addColorStop(0.5, `rgba(${st.r},${st.g},${st.b},${alpha*0.3})`);
+      grad.addColorStop(1, `rgba(${st.r},${st.g},${st.b},0)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(px-glowR,py-glowR,glowR*2,glowR*2);
+    }
+  }
+  for (let gy = 0; gy < GRID; gy++) for (let gx = 0; gx < GRID; gx++) {
+    const px = off+gx*(cellSize+gap), py = off+gy*(cellSize+gap);
+    const st = cells.get(gx+","+gy);
+    const br = st ? st.brightness : 0;
+    if (br > 0.03 && st) {
+      ctx.beginPath(); ctx.roundRect(px,py,cellSize,cellSize,rad);
+      if (isDark) {
+        ctx.fillStyle = `rgb(${Math.round(st.r*(0.3+0.7*br))},${Math.round(st.g*(0.3+0.7*br))},${Math.round(st.b*(0.3+0.7*br))})`;
+      } else {
+        ctx.fillStyle = `rgba(${st.r},${st.g},${st.b},${0.3+br*0.7})`;
+      }
+      ctx.fill();
+      if (isDark && br > 0.4) {
+        const hx=px+cellSize/2, hy=py+cellSize/2;
+        const hGrad = ctx.createRadialGradient(hx,hy,0,hx,hy,cellSize*0.35);
+        hGrad.addColorStop(0, `rgba(255,255,230,${br*0.5})`);
+        hGrad.addColorStop(1, `rgba(255,255,230,0)`);
+        ctx.fillStyle = hGrad;
+        ctx.beginPath(); ctx.roundRect(px,py,cellSize,cellSize,rad);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+function setCell(cells, x, y, br, col) {
+  if (x < 0 || x >= GRID || y < 0 || y >= GRID || br < 0.03) return;
+  const key = x+","+y;
+  const ex = cells.get(key);
+  if (!ex || ex.brightness < br) {
+    cells.set(key, { brightness: br, r: col.r, g: col.g, b: col.b });
+  }
+}
+
+// ============================================================
+// FACE ANIMATIONS
+// ============================================================
+const ANIM_DEFS = {
+
+"Blinker": {
+  desc: "Simple face with eyes that blink periodically",
+  params: {
+    speed:     { min: 0.5, max: 3, step: 0.1, default: 1 },
+    blinkRate: { min: 1, max: 5, step: 0.5, default: 3 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    // Blink cycle: open most of the time, brief close
+    const blinkPhase = (t * p.speed) % p.blinkRate;
+    const eyeOpen = blinkPhase > 0.15;
+    // Eyes
+    if (eyeOpen) {
+      setCell(cells, 2, 2, 0.9, COL_B);
+      setCell(cells, 4, 2, 0.9, COL_B);
+    } else {
+      setCell(cells, 2, 3, 0.5, COL_B);
+      setCell(cells, 4, 3, 0.5, COL_B);
+    }
+    // Mouth — gentle smile
+    setCell(cells, 2, 5, 0.6, COL_O);
+    setCell(cells, 3, 5, 0.7, COL_O);
+    setCell(cells, 4, 5, 0.6, COL_O);
+    return cells;
+  },
+  code(p) { return `// Blinker — speed: ${p.speed}, blinkRate: ${p.blinkRate}`; },
+},
+
+"Looker": {
+  desc: "Eyes slowly look left, center, right, center — with blinks",
+  params: {
+    speed:     { min: 0.3, max: 2, step: 0.1, default: 0.6 },
+    blinkRate: { min: 2, max: 6, step: 0.5, default: 3.5 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    // Look direction
+    const lookPhase = (t * p.speed) % 4;
+    let eyeOffX = 0;
+    if (lookPhase < 1) eyeOffX = 0;
+    else if (lookPhase < 2) eyeOffX = -1;
+    else if (lookPhase < 3) eyeOffX = 0;
+    else eyeOffX = 1;
+    // Blink
+    const blinkPhase = (t * p.speed * 1.7) % p.blinkRate;
+    const eyeOpen = blinkPhase > 0.12;
+    // Eye sockets (subtle)
+    setCell(cells, 1, 2, 0.12, COL_B);
+    setCell(cells, 2, 2, 0.12, COL_B);
+    setCell(cells, 3, 2, 0.12, COL_B);
+    setCell(cells, 4, 2, 0.12, COL_B);
+    setCell(cells, 5, 2, 0.12, COL_B);
+    // Pupils
+    if (eyeOpen) {
+      setCell(cells, 2 + eyeOffX, 2, 0.9, COL_B);
+      setCell(cells, 4 + eyeOffX, 2, 0.9, COL_B);
+    } else {
+      setCell(cells, 1, 3, 0.3, COL_B);
+      setCell(cells, 2, 3, 0.4, COL_B);
+      setCell(cells, 4, 3, 0.4, COL_B);
+      setCell(cells, 5, 3, 0.3, COL_B);
+    }
+    // Mouth
+    setCell(cells, 2, 5, 0.5, COL_O);
+    setCell(cells, 3, 5, 0.6, COL_O);
+    setCell(cells, 4, 5, 0.5, COL_O);
+    return cells;
+  },
+  code(p) { return `// Looker — speed: ${p.speed}, blinkRate: ${p.blinkRate}`; },
+},
+
+"Emoji Cycle": {
+  desc: "Cycles through expressions: happy, thinking, surprised, wink",
+  params: {
+    speed: { min: 0.2, max: 2, step: 0.1, default: 0.5 },
+    fade:  { min: 0, max: 1, step: 0.1, default: 0.5 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const phase = Math.floor((t * p.speed) % 4);
+    const sub = (t * p.speed) % 1;
+    const fadeIn = sub < 0.15 ? sub / 0.15 : 1;
+    const br = p.fade + (1 - p.fade) * fadeIn;
+
+    if (phase === 0) {
+      // Happy :)
+      setCell(cells, 2, 2, 0.9*br, COL_B);
+      setCell(cells, 4, 2, 0.9*br, COL_B);
+      setCell(cells, 1, 4, 0.4*br, COL_O);
+      setCell(cells, 2, 5, 0.7*br, COL_O);
+      setCell(cells, 3, 5, 0.7*br, COL_O);
+      setCell(cells, 4, 5, 0.7*br, COL_O);
+      setCell(cells, 5, 4, 0.4*br, COL_O);
+    } else if (phase === 1) {
+      // Thinking — eyes look up-right, mouth is flat/small
+      setCell(cells, 2, 1, 0.7*br, COL_B);
+      setCell(cells, 5, 1, 0.7*br, COL_B);
+      setCell(cells, 3, 5, 0.5*br, COL_O);
+      setCell(cells, 4, 5, 0.5*br, COL_O);
+      // Dots to suggest thinking
+      const dot = Math.sin(t * 4) > 0 ? 0.5 : 0.15;
+      setCell(cells, 0, 3, dot*br, COL_O);
+    } else if (phase === 2) {
+      // Surprised :O
+      setCell(cells, 2, 1, 0.9*br, COL_B);
+      setCell(cells, 4, 1, 0.9*br, COL_B);
+      setCell(cells, 2, 2, 0.5*br, COL_B);
+      setCell(cells, 4, 2, 0.5*br, COL_B);
+      // O mouth
+      setCell(cells, 3, 4, 0.6*br, COL_O);
+      setCell(cells, 2, 5, 0.5*br, COL_O);
+      setCell(cells, 4, 5, 0.5*br, COL_O);
+      setCell(cells, 3, 6, 0.6*br, COL_O);
+    } else {
+      // Wink ;)
+      setCell(cells, 2, 2, 0.9*br, COL_B);
+      // Winking eye — horizontal line
+      setCell(cells, 4, 2, 0.3*br, COL_B);
+      setCell(cells, 5, 3, 0.3*br, COL_B);
+      // Smile
+      setCell(cells, 1, 4, 0.3*br, COL_O);
+      setCell(cells, 2, 5, 0.6*br, COL_O);
+      setCell(cells, 3, 5, 0.7*br, COL_O);
+      setCell(cells, 4, 5, 0.6*br, COL_O);
+      setCell(cells, 5, 4, 0.3*br, COL_O);
+    }
+    return cells;
+  },
+  code(p) { return `// Emoji Cycle — speed: ${p.speed}, fade: ${p.fade}`; },
+},
+
+"Sleepy": {
+  desc: "Drowsy face — eyes slowly droop and open, gentle breathing glow",
+  params: {
+    speed: { min: 0.1, max: 1, step: 0.05, default: 0.3 },
+    glow:  { min: 0, max: 0.5, step: 0.05, default: 0.2 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    // Eye droop: sine wave between open and half-closed
+    const droop = (Math.sin(t * p.speed) + 1) / 2; // 0=open, 1=closed
+    const eyeBr = 0.9 - droop * 0.5;
+    // Breathing background glow
+    const breathe = (Math.sin(t * p.speed * 0.7) + 1) / 2 * p.glow;
+    for (let gy = 0; gy < GRID; gy++) for (let gx = 0; gx < GRID; gx++) {
+      const dist = Math.abs(gx-3)+Math.abs(gy-3);
+      if (dist < 4 && breathe > 0.02) {
+        setCell(cells, gx, gy, breathe * (1-dist/5), COL_B);
+      }
+    }
+    if (droop < 0.7) {
+      // Eyes open-ish
+      setCell(cells, 2, 2, eyeBr, COL_B);
+      setCell(cells, 4, 2, eyeBr, COL_B);
+    }
+    if (droop > 0.3) {
+      // Half-lid lines
+      setCell(cells, 1, 2, 0.3 * droop, COL_B);
+      setCell(cells, 3, 2, 0.2 * droop, COL_B);
+      setCell(cells, 5, 2, 0.3 * droop, COL_B);
+    }
+    // Sleepy mouth
+    setCell(cells, 3, 5, 0.4, COL_O);
+    // Zzz
+    const zPhase = (t * p.speed * 2) % 3;
+    if (droop > 0.5) {
+      if (zPhase > 0) setCell(cells, 5, 0, 0.3 * droop, COL_W);
+      if (zPhase > 1) setCell(cells, 6, 0, 0.25 * droop, COL_W);
+      if (zPhase > 2) setCell(cells, 6, 1, 0.2 * droop, COL_W);
+    }
+    return cells;
+  },
+  code(p) { return `// Sleepy — speed: ${p.speed}, glow: ${p.glow}`; },
+},
+
+"Bot Face": {
+  desc: "Robotic face with rectangular eyes and antenna pulse",
+  params: {
+    speed:   { min: 0.3, max: 2, step: 0.1, default: 0.8 },
+    antenna: { min: 0.3, max: 1, step: 0.1, default: 0.7 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    // Antenna
+    const pulse = (Math.sin(t * p.speed * 3) + 1) / 2;
+    setCell(cells, 3, 0, pulse * p.antenna, COL_O);
+    // Head outline (subtle)
+    for (let x = 1; x <= 5; x++) { setCell(cells, x, 1, 0.15, COL_B); setCell(cells, x, 6, 0.15, COL_B); }
+    for (let y = 1; y <= 6; y++) { setCell(cells, 1, y, 0.15, COL_B); setCell(cells, 5, y, 0.15, COL_B); }
+    // Eyes — rectangular, blink
+    const blinkPhase = (t * p.speed) % 3;
+    const eyeOpen = blinkPhase > 0.1;
+    if (eyeOpen) {
+      setCell(cells, 2, 3, 0.85, COL_B);
+      setCell(cells, 3, 3, 0.6, COL_B);
+      setCell(cells, 4, 3, 0.85, COL_B);
+      setCell(cells, 2, 2, 0.5, COL_B);
+      setCell(cells, 4, 2, 0.5, COL_B);
+    } else {
+      setCell(cells, 2, 3, 0.4, COL_B);
+      setCell(cells, 3, 3, 0.4, COL_B);
+      setCell(cells, 4, 3, 0.4, COL_B);
+    }
+    // Mouth — oscillates
+    const mouthW = Math.round(1 + Math.sin(t * p.speed * 1.5) * 1);
+    for (let x = 3 - mouthW; x <= 3 + mouthW; x++) {
+      setCell(cells, x, 5, 0.6, COL_O);
+    }
+    return cells;
+  },
+  code(p) { return `// Bot Face — speed: ${p.speed}, antenna: ${p.antenna}`; },
+},
+
+"Pixel Cat": {
+  desc: "Cat face with twitching ears and slow blinks",
+  params: {
+    speed:     { min: 0.3, max: 2, step: 0.1, default: 0.7 },
+    earTwitch: { min: 0.5, max: 3, step: 0.1, default: 1.5 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    // Ears
+    const twitch = Math.sin(t * p.earTwitch) > 0.7;
+    setCell(cells, 1, 0, twitch ? 0.8 : 0.6, COL_O);
+    setCell(cells, 0, 1, 0.4, COL_O);
+    setCell(cells, 5, 0, twitch ? 0.6 : 0.8, COL_O);
+    setCell(cells, 6, 1, 0.4, COL_O);
+    // Head
+    setCell(cells, 1, 1, 0.2, COL_O);
+    setCell(cells, 5, 1, 0.2, COL_O);
+    // Eyes — blink
+    const blinkPhase = (t * p.speed) % 4;
+    if (blinkPhase > 0.15) {
+      setCell(cells, 2, 2, 0.9, COL_B);
+      setCell(cells, 4, 2, 0.9, COL_B);
+    } else {
+      setCell(cells, 2, 3, 0.4, COL_B);
+      setCell(cells, 4, 3, 0.4, COL_B);
+    }
+    // Nose
+    setCell(cells, 3, 3, 0.5, COL_O);
+    // Whiskers (subtle)
+    setCell(cells, 0, 3, 0.2, COL_W);
+    setCell(cells, 1, 4, 0.15, COL_W);
+    setCell(cells, 6, 3, 0.2, COL_W);
+    setCell(cells, 5, 4, 0.15, COL_W);
+    // Mouth
+    setCell(cells, 2, 4, 0.3, COL_O);
+    setCell(cells, 4, 4, 0.3, COL_O);
+    return cells;
+  },
+  code(p) { return `// Pixel Cat — speed: ${p.speed}, earTwitch: ${p.earTwitch}`; },
+},
+
+"Ghost": {
+  desc: "Cute ghost that floats up and down with wobbling bottom",
+  params: {
+    speed:  { min: 0.2, max: 1.5, step: 0.05, default: 0.5 },
+    wobble: { min: 0.5, max: 3, step: 0.1, default: 1.5 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const floatY = Math.sin(t * p.speed) * 0.6;
+    // Body shape
+    const shape = [
+      [0,0,1,1,1,0,0],
+      [0,1,1,1,1,1,0],
+      [0,1,1,1,1,1,0],
+      [0,1,1,1,1,1,0],
+      [0,1,1,1,1,1,0],
+      [1,0,1,0,1,0,1],
+    ];
+    // Wobble bottom row
+    const w = Math.sin(t * p.wobble * 2);
+    const bottom = w > 0 ? [1,0,1,0,1,0,1] : [0,1,0,1,0,1,0];
+
+    for (let y = 0; y < shape.length; y++) {
+      for (let x = 0; x < 7; x++) {
+        const row = y === shape.length - 1 ? bottom : shape[y];
+        if (!row[x]) continue;
+        const fy = Math.round(y + floatY);
+        if (fy < 0 || fy >= GRID) continue;
+        setCell(cells, x, fy, 0.6, COL_B);
+      }
+    }
+    // Eyes
+    const ey = Math.round(2 + floatY);
+    if (ey >= 0 && ey < GRID) {
+      setCell(cells, 2, ey, 0.9, COL_O);
+      setCell(cells, 4, ey, 0.9, COL_O);
+    }
+    return cells;
+  },
+  code(p) { return `// Ghost — speed: ${p.speed}, wobble: ${p.wobble}`; },
+},
+
+"Talker": {
+  desc: "Face with mouth that opens and closes like it's speaking",
+  params: {
+    speed: { min: 0.5, max: 4, step: 0.1, default: 2 },
+    size:  { min: 0.3, max: 1, step: 0.1, default: 0.6 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    // Eyes
+    setCell(cells, 2, 2, 0.85, COL_B);
+    setCell(cells, 4, 2, 0.85, COL_B);
+    // Mouth — opens and closes
+    const openness = Math.max(0, Math.sin(t * p.speed * 3)) * p.size;
+    // Always show a line
+    setCell(cells, 2, 4, 0.5, COL_O);
+    setCell(cells, 3, 4, 0.6, COL_O);
+    setCell(cells, 4, 4, 0.5, COL_O);
+    if (openness > 0.2) {
+      setCell(cells, 2, 5, 0.5 * openness, COL_O);
+      setCell(cells, 3, 5, 0.6 * openness, COL_O);
+      setCell(cells, 4, 5, 0.5 * openness, COL_O);
+    }
+    // Occasional blink
+    const blinkPhase = (t * 0.8) % 4;
+    if (blinkPhase < 0.1) {
+      // Eyes closed
+      setCell(cells, 2, 2, 0.3, COL_B);
+      setCell(cells, 4, 2, 0.3, COL_B);
+    }
+    return cells;
+  },
+  code(p) { return `// Talker — speed: ${p.speed}, size: ${p.size}`; },
+},
+
+"Smiley Pulse": {
+  desc: "Classic smiley face that pulses/breathes with a warm glow",
+  params: {
+    speed: { min: 0.1, max: 1, step: 0.05, default: 0.3 },
+    glow:  { min: 0.1, max: 0.5, step: 0.05, default: 0.25 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const pulse = 0.7 + Math.sin(t * p.speed) * 0.3;
+    // Background glow
+    const bg = (Math.sin(t * p.speed * 0.8) + 1) / 2 * p.glow;
+    for (let gy = 0; gy < GRID; gy++) for (let gx = 0; gx < GRID; gx++) {
+      const dist = Math.sqrt((gx-3)**2+(gy-3)**2);
+      if (dist < 3.5 && bg > 0.02) {
+        setCell(cells, gx, gy, bg * (1-dist/4), COL_O);
+      }
+    }
+    // Eyes
+    setCell(cells, 2, 2, 0.9 * pulse, COL_B);
+    setCell(cells, 4, 2, 0.9 * pulse, COL_B);
+    // Smile
+    setCell(cells, 1, 4, 0.4 * pulse, COL_O);
+    setCell(cells, 2, 5, 0.7 * pulse, COL_O);
+    setCell(cells, 3, 5, 0.7 * pulse, COL_O);
+    setCell(cells, 4, 5, 0.7 * pulse, COL_O);
+    setCell(cells, 5, 4, 0.4 * pulse, COL_O);
+    return cells;
+  },
+  code(p) { return `// Smiley Pulse — speed: ${p.speed}, glow: ${p.glow}`; },
+},
+
+"Alien": {
+  desc: "Big almond eyes, tiny mouth, head sways side to side",
+  params: {
+    speed: { min: 0.2, max: 1.5, step: 0.05, default: 0.5 },
+    sway:  { min: 0, max: 1, step: 0.1, default: 0.5 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const sx = Math.round(Math.sin(t * p.speed) * p.sway);
+    // Big eyes
+    setCell(cells, 1+sx, 2, 0.6, COL_B);
+    setCell(cells, 2+sx, 2, 0.9, COL_B);
+    setCell(cells, 2+sx, 1, 0.5, COL_B);
+    setCell(cells, 4+sx, 2, 0.9, COL_B);
+    setCell(cells, 5+sx, 2, 0.6, COL_B);
+    setCell(cells, 4+sx, 1, 0.5, COL_B);
+    // Pupils shift
+    const look = Math.round(Math.sin(t * p.speed * 1.7) * 0.5);
+    setCell(cells, 2+sx+look, 2, 1, COL_W);
+    setCell(cells, 4+sx+look, 2, 1, COL_W);
+    // Tiny mouth
+    setCell(cells, 3+sx, 4, 0.4, COL_O);
+    // Head outline (faint)
+    setCell(cells, 3+sx, 0, 0.15, COL_B);
+    setCell(cells, 2+sx, 0, 0.1, COL_B);
+    setCell(cells, 4+sx, 0, 0.1, COL_B);
+    return cells;
+  },
+  code(p) { return `// Alien — speed: ${p.speed}, sway: ${p.sway}`; },
+},
+
+"Mood Ring": {
+  desc: "Face expression shifts — the surrounding ring color changes with mood",
+  params: {
+    speed: { min: 0.2, max: 1, step: 0.05, default: 0.35 },
+    ring:  { min: 0.1, max: 0.5, step: 0.05, default: 0.25 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const mood = Math.floor((t * p.speed) % 3); // 0=happy, 1=neutral, 2=sad
+    const ringCol = mood === 0 ? COL_O : mood === 1 ? COL_W : COL_B;
+    // Ring
+    for (let gy = 0; gy < GRID; gy++) for (let gx = 0; gx < GRID; gx++) {
+      const dist = Math.max(Math.abs(gx-3), Math.abs(gy-3));
+      if (dist === 3) setCell(cells, gx, gy, p.ring, ringCol);
+    }
+    // Eyes
+    setCell(cells, 2, 2, 0.85, COL_B);
+    setCell(cells, 4, 2, 0.85, COL_B);
+    // Mouth based on mood
+    if (mood === 0) { // happy
+      setCell(cells, 1, 4, 0.3, COL_O);
+      setCell(cells, 2, 5, 0.6, COL_O);
+      setCell(cells, 3, 5, 0.6, COL_O);
+      setCell(cells, 4, 5, 0.6, COL_O);
+      setCell(cells, 5, 4, 0.3, COL_O);
+    } else if (mood === 1) { // neutral
+      setCell(cells, 2, 4, 0.5, COL_O);
+      setCell(cells, 3, 4, 0.5, COL_O);
+      setCell(cells, 4, 4, 0.5, COL_O);
+    } else { // sad
+      setCell(cells, 1, 5, 0.3, COL_O);
+      setCell(cells, 2, 4, 0.6, COL_O);
+      setCell(cells, 3, 4, 0.6, COL_O);
+      setCell(cells, 4, 4, 0.6, COL_O);
+      setCell(cells, 5, 5, 0.3, COL_O);
+    }
+    return cells;
+  },
+  code(p) { return `// Mood Ring — speed: ${p.speed}, ring: ${p.ring}`; },
+},
+
+"Heart Eyes": {
+  desc: "Face with pulsing heart-shaped eyes",
+  params: {
+    speed: { min: 0.3, max: 2, step: 0.1, default: 0.8 },
+    pulse: { min: 0.3, max: 1, step: 0.05, default: 0.6 },
+  },
+  fn(t, p) {
+    const cells = new Map();
+    const beat = 0.5 + Math.abs(Math.sin(t * p.speed * 2)) * p.pulse;
+    // Left heart-eye
+    setCell(cells, 1, 1, 0.6*beat, COL_O);
+    setCell(cells, 3, 1, 0.6*beat, COL_O);
+    setCell(cells, 1, 2, 0.8*beat, COL_O);
+    setCell(cells, 2, 2, 0.9*beat, COL_O);
+    setCell(cells, 3, 2, 0.8*beat, COL_O);
+    setCell(cells, 2, 3, 0.5*beat, COL_O);
+    // Right heart-eye
+    setCell(cells, 4, 1, 0.6*beat, COL_O);
+    setCell(cells, 6, 1, 0.6*beat, COL_O);
+    setCell(cells, 4, 2, 0.8*beat, COL_O);
+    setCell(cells, 5, 2, 0.9*beat, COL_O);
+    setCell(cells, 6, 2, 0.8*beat, COL_O);
+    setCell(cells, 5, 3, 0.5*beat, COL_O);
+    // Smile
+    setCell(cells, 2, 5, 0.5, COL_B);
+    setCell(cells, 3, 6, 0.6, COL_B);
+    setCell(cells, 4, 5, 0.5, COL_B);
+    return cells;
+  },
+  code(p) { return `// Heart Eyes — speed: ${p.speed}, pulse: ${p.pulse}`; },
+},
+
+};
+
+// ============================================================
+// BUILD UI (same pattern as other preview)
+// ============================================================
+const container = document.getElementById("cards");
+const cardStates = [];
+
+for (const [name, def] of Object.entries(ANIM_DEFS)) {
+  const state = { name, def, params: {}, canvasesDark: [], canvasesLight: [], playing: false };
+  for (const [k, v] of Object.entries(def.params)) state.params[k] = v.default;
+
+  const card = document.createElement("div");
+  card.className = "card paused";
+
+  const header = document.createElement("div");
+  header.className = "card-header";
+  const h3 = document.createElement("h3");
+  h3.textContent = name;
+  header.appendChild(h3);
+  const btnGroup = document.createElement("div");
+  btnGroup.className = "btn-group";
+  const playBtn = document.createElement("button");
+  playBtn.className = "btn";
+  playBtn.textContent = "\u25B6 Play";
+  playBtn.onclick = () => {
+    state.playing = !state.playing;
+    playBtn.textContent = state.playing ? "\u25A0 Stop" : "\u25B6 Play";
+    playBtn.classList.toggle("playing", state.playing);
+    card.classList.toggle("paused", !state.playing);
+  };
+  btnGroup.appendChild(playBtn);
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "btn";
+  copyBtn.textContent = "Copy";
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(def.code(state.params)).then(() => {
+      copyBtn.textContent = "Copied!";
+      copyBtn.classList.add("copied");
+      setTimeout(() => { copyBtn.textContent = "Copy"; copyBtn.classList.remove("copied"); }, 1500);
+    });
+  };
+  btnGroup.appendChild(copyBtn);
+  header.appendChild(btnGroup);
+  card.appendChild(header);
+
+  const previews = document.createElement("div");
+  previews.className = "previews";
+  const darkBg = document.createElement("div");
+  darkBg.className = "dark-bg";
+  for (const sz of SIZES_DARK) {
+    const item = document.createElement("div");
+    item.className = "prev-item";
+    const c = makeCanvas(item, sz);
+    const lbl = document.createElement("label");
+    lbl.textContent = sz + "px";
+    item.appendChild(lbl);
+    darkBg.appendChild(item);
+    state.canvasesDark.push({ canvas: c, size: sz });
+  }
+  previews.appendChild(darkBg);
+  const lightBg = document.createElement("div");
+  lightBg.className = "light-bg";
+  for (const sz of SIZES_LIGHT) {
+    const item = document.createElement("div");
+    item.className = "prev-item";
+    const c = makeCanvas(item, sz);
+    const lbl = document.createElement("label");
+    lbl.textContent = sz + "px";
+    item.appendChild(lbl);
+    lightBg.appendChild(item);
+    state.canvasesLight.push({ canvas: c, size: sz });
+  }
+  previews.appendChild(lightBg);
+  card.appendChild(previews);
+
+  const controls = document.createElement("div");
+  controls.className = "controls-row";
+  for (const [pName, pDef] of Object.entries(def.params)) {
+    const label = document.createElement("label");
+    label.textContent = pName.charAt(0).toUpperCase()+pName.slice(1)+" ";
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = pDef.min; slider.max = pDef.max; slider.step = pDef.step; slider.value = pDef.default;
+    const valSpan = document.createElement("span");
+    valSpan.className = "val";
+    valSpan.textContent = pDef.default;
+    slider.oninput = () => { state.params[pName] = +slider.value; valSpan.textContent = slider.value; };
+    label.appendChild(slider);
+    label.appendChild(valSpan);
+    controls.appendChild(label);
+  }
+  card.appendChild(controls);
+
+  const desc = document.createElement("p");
+  desc.textContent = def.desc;
+  card.appendChild(desc);
+
+  container.appendChild(card);
+  cardStates.push(state);
+}
+
+let lastTime = 0, elapsed = 0;
+function animate(time) {
+  if (!lastTime) lastTime = time;
+  const dt = Math.min(time - lastTime, 50) / 1000;
+  lastTime = time;
+  elapsed += dt;
+  for (const state of cardStates) {
+    if (!state.playing) continue;
+    const cells = state.def.fn(elapsed, state.params);
+    for (const { canvas, size } of state.canvasesDark) drawLED(canvas.getContext("2d"), size, cells, true);
+    for (const { canvas, size } of state.canvasesLight) drawLED(canvas.getContext("2d"), size, cells, false);
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat Input — LibreChat Style</title>
+<style>
+  /* Reset */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /* LibreChat dark palette */
+  :root {
+    --surface-primary: #0d0d0d;
+    --surface-secondary: #212121;
+    --surface-tertiary: #2f2f2f;
+    --surface-chat: #2f2f2f;
+    --text-primary: #ececec;
+    --text-secondary: #b4b4b4;
+    --text-tertiary: #8e8e8e;
+    --border-light: #2f2f2f;
+    --border-medium: #424242;
+    --border-heavy: #595959;
+  }
+
+  body {
+    background: var(--surface-primary);
+    color: var(--text-primary);
+    font-family: 'Söhne', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* Outer container */
+  .container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 768px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+
+  .chat-body {
+    flex: 1;
+    padding: 24px 16px;
+  }
+
+  /* Input wrapper pinned to bottom */
+  .wrapper {
+    padding: 0 16px 24px;
+  }
+
+  /* ── Input Card (LibreChat style) ──────────── */
+  .input-card {
+    background: var(--surface-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: 24px;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .input-card:focus-within {
+    border-color: var(--border-medium);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  /* ── Textarea ──────────────────────────────── */
+  .textarea-wrap {
+    padding: 14px 20px 0;
+  }
+
+  .textarea-wrap textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1.5;
+    resize: none;
+    min-height: 26px;
+    max-height: 200px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .textarea-wrap textarea::placeholder {
+    color: var(--text-tertiary);
+  }
+  .textarea-wrap textarea::-webkit-scrollbar { width: 4px; }
+  .textarea-wrap textarea::-webkit-scrollbar-track { background: transparent; }
+  .textarea-wrap textarea::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 2px; }
+
+  /* ── Bottom Bar ────────────────────────────── */
+  .bottom-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 10px 10px 14px;
+  }
+
+  .bar-spacer { flex: 1; }
+
+  /* ── Permission Picker ─────────────────────── */
+  .perm-picker {
+    position: relative;
+  }
+
+  .perm-trigger {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 5px 8px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .perm-trigger:hover {
+    background: var(--surface-tertiary);
+    color: var(--text-primary);
+  }
+  .perm-trigger.open {
+    background: var(--surface-tertiary);
+    border-color: var(--border-medium);
+    color: var(--text-primary);
+  }
+  .perm-trigger svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .perm-trigger .chevron {
+    width: 12px;
+    height: 12px;
+    color: var(--text-tertiary);
+    transition: transform 0.2s;
+  }
+  .perm-trigger.open .chevron {
+    transform: rotate(180deg);
+  }
+
+  /* Dropdown menu */
+  .perm-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    min-width: 200px;
+    background: var(--surface-secondary);
+    border: 1px solid var(--border-medium);
+    border-radius: 12px;
+    padding: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+    z-index: 100;
+  }
+  .perm-menu.open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
+  .perm-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 10px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 13px;
+    transition: background 0.12s, color 0.12s;
+    text-align: left;
+  }
+  .perm-option:hover {
+    background: var(--surface-tertiary);
+    color: var(--text-primary);
+  }
+  .perm-option.active {
+    color: var(--text-primary);
+  }
+  .perm-option .opt-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--surface-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .perm-option.active .opt-icon {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .perm-option .opt-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+  .perm-option .opt-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+  }
+  .perm-option .opt-name {
+    font-weight: 500;
+    font-size: 13px;
+  }
+  .perm-option .opt-desc {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+
+  .perm-option .opt-check {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    opacity: 0;
+  }
+  .perm-option.active .opt-check {
+    opacity: 1;
+    color: var(--text-primary);
+  }
+
+  /* ── Send Button (LibreChat style — white circle) ── */
+  .send-btn {
+    background: var(--text-primary);
+    border: none;
+    color: var(--surface-primary);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: default;
+    margin-left: 4px;
+    transition: opacity 0.2s;
+    flex-shrink: 0;
+    opacity: 0.1;
+  }
+  .send-btn.ready {
+    opacity: 1;
+    cursor: pointer;
+  }
+  .send-btn.ready:hover {
+    opacity: 0.85;
+  }
+  .send-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* ── Hint text below ───────────────────────── */
+  .hint {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    padding: 8px 0 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="chat-body"></div>
+  <div class="wrapper">
+
+  <div class="input-card">
+
+    <!-- Textarea -->
+    <div class="textarea-wrap">
+      <textarea id="input" rows="1" placeholder="Message…"></textarea>
+    </div>
+
+    <!-- Bottom Bar -->
+    <div class="bottom-bar">
+      <!-- Permission Picker -->
+      <div class="perm-picker" id="permPicker">
+        <button class="perm-trigger" id="permTrigger">
+          <svg id="triggerIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+          <span id="triggerLabel">Ask</span>
+          <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+
+        <div class="perm-menu" id="permMenu">
+          <button class="perm-option active" data-mode="ask">
+            <div class="opt-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+            </div>
+            <div class="opt-text">
+              <span class="opt-name">Ask</span>
+              <span class="opt-desc">Confirm before acting</span>
+            </div>
+            <svg class="opt-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+
+          <button class="perm-option" data-mode="edits">
+            <div class="opt-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            </div>
+            <div class="opt-text">
+              <span class="opt-name">Edits</span>
+              <span class="opt-desc">Auto-approve file edits</span>
+            </div>
+            <svg class="opt-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+
+          <button class="perm-option" data-mode="full">
+            <div class="opt-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"/><polygon points="2 19 11 12 2 5 2 19"/></svg>
+            </div>
+            <div class="opt-text">
+              <span class="opt-name">Full</span>
+              <span class="opt-desc">Auto-approve everything</span>
+            </div>
+            <svg class="opt-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="bar-spacer"></div>
+
+      <!-- Send -->
+      <button class="send-btn" title="Send message">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+      </button>
+    </div>
+
+  </div>
+
+  <div class="hint">Overlay can make mistakes. Review important info.</div>
+
+  </div>
+</div>
+
+<script>
+  // Auto-expanding textarea + send button state
+  const textarea = document.getElementById('input');
+  const sendBtn = document.querySelector('.send-btn');
+
+  function updateSendBtn() {
+    if (textarea.value.trim().length > 0) {
+      sendBtn.classList.add('ready');
+    } else {
+      sendBtn.classList.remove('ready');
+    }
+  }
+
+  textarea.addEventListener('input', () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+    updateSendBtn();
+  });
+
+  // Permission picker
+  const permPicker = document.getElementById('permPicker');
+  const permTrigger = document.getElementById('permTrigger');
+  const permMenu = document.getElementById('permMenu');
+  const triggerIcon = document.getElementById('triggerIcon');
+  const triggerLabel = document.getElementById('triggerLabel');
+  const permOptions = permMenu.querySelectorAll('.perm-option');
+
+  // Toggle menu
+  permTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = permMenu.classList.contains('open');
+    if (isOpen) {
+      closeMenu();
+    } else {
+      permMenu.classList.add('open');
+      permTrigger.classList.add('open');
+    }
+  });
+
+  function closeMenu() {
+    permMenu.classList.remove('open');
+    permTrigger.classList.remove('open');
+  }
+
+  // Select option
+  permOptions.forEach(opt => {
+    opt.addEventListener('click', () => {
+      permOptions.forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+
+      // Update trigger to reflect selection
+      triggerLabel.textContent = opt.querySelector('.opt-name').textContent;
+      triggerIcon.innerHTML = opt.querySelector('.opt-icon svg').innerHTML;
+
+      closeMenu();
+    });
+  });
+
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    if (!permPicker.contains(e.target)) {
+      closeMenu();
+    }
+  });
+
+  // Close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeMenu();
+  });
+
+  // Focus textarea on load
+  textarea.focus();
+</script>
+</body>
+</html>

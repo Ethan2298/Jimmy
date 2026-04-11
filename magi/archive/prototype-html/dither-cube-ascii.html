@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D ASCII Dither Cube</title>
+  <style>
+    :root {
+      --bg-0: #040910;
+      --bg-1: #07111f;
+      --cyan: rgb(40, 180, 255);
+      --cyan-dim: rgba(40, 180, 255, 0.48);
+      --panel-bg: rgba(5, 15, 25, 0.82);
+      --panel-border: rgba(120, 190, 230, 0.22);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--cyan);
+      background:
+        radial-gradient(1300px 700px at 30% 20%, #0b1f35 0%, transparent 55%),
+        radial-gradient(900px 500px at 80% 75%, #0a1d30 0%, transparent 60%),
+        linear-gradient(140deg, var(--bg-0) 0%, var(--bg-1) 100%);
+    }
+
+    #ascii-output {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      padding: 8px 10px;
+      white-space: pre;
+      overflow: hidden;
+      user-select: none;
+      pointer-events: none;
+      color: var(--cyan);
+      text-shadow: 0 0 8px rgba(40, 180, 255, 0.25);
+      letter-spacing: 0;
+    }
+
+    #interaction-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      cursor: grab;
+    }
+
+    #interaction-layer:active {
+      cursor: grabbing;
+    }
+
+    .panel {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      z-index: 20;
+      width: min(300px, calc(100vw - 28px));
+      border: 1px solid var(--panel-border);
+      background: var(--panel-bg);
+      backdrop-filter: blur(6px);
+      border-radius: 10px;
+      padding: 12px;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+      pointer-events: auto;
+    }
+
+    .panel h1 {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(190, 235, 255, 0.95);
+      margin-bottom: 4px;
+    }
+
+    .panel .subtitle {
+      font-size: 11px;
+      color: rgba(170, 210, 230, 0.8);
+      margin-bottom: 12px;
+      line-height: 1.35;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .row:first-of-type {
+      margin-top: 0;
+    }
+
+    .label {
+      font-size: 11px;
+      color: rgba(170, 218, 236, 0.9);
+    }
+
+    .value {
+      font-size: 11px;
+      color: rgba(190, 235, 255, 0.95);
+      min-width: 52px;
+      text-align: right;
+    }
+
+    input[type="range"] {
+      grid-column: 1 / -1;
+      width: 100%;
+      accent-color: rgb(70, 190, 255);
+    }
+
+    .readout {
+      margin-top: 10px;
+      border-top: 1px solid rgba(120, 190, 230, 0.2);
+      padding-top: 8px;
+      font-size: 10px;
+      line-height: 1.4;
+      color: var(--cyan-dim);
+    }
+
+    #gl-canvas {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <pre id="ascii-output" aria-hidden="true"></pre>
+  <div id="interaction-layer" aria-hidden="true"></div>
+
+  <aside class="panel">
+    <h1>3D ASCII Dither Cube</h1>
+    <p class="subtitle">Drag anywhere to orbit. Cube shading is converted into ordered-dither ASCII in real time.</p>
+
+    <div class="row">
+      <span class="label">Char density</span>
+      <span class="value" id="density-value"></span>
+      <input id="char-density" type="range" min="2" max="15" step="1" value="15">
+    </div>
+
+    <div class="row">
+      <span class="label">Dither strength</span>
+      <span class="value" id="dither-value"></span>
+      <input id="dither-strength" type="range" min="0" max="1" step="0.01" value="0.40">
+    </div>
+
+    <div class="row">
+      <span class="label">Resolution scale</span>
+      <span class="value" id="resolution-value"></span>
+      <input id="resolution-scale" type="range" min="0.75" max="1.7" step="0.05" value="1.00">
+    </div>
+
+    <div class="readout" id="performance-readout"></div>
+  </aside>
+
+  <canvas id="gl-canvas"></canvas>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.181.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.181.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+    // Classic ASCII ramp from dark to bright (space -> symbols/numbers).
+    const FULL_RAMP = Array.from(" .,:;i1tfLCG08@");
+    const BAYER8 = [
+      [0, 32, 8, 40, 2, 34, 10, 42],
+      [48, 16, 56, 24, 50, 18, 58, 26],
+      [12, 44, 4, 36, 14, 46, 6, 38],
+      [60, 28, 52, 20, 62, 30, 54, 22],
+      [3, 35, 11, 43, 1, 33, 9, 41],
+      [51, 19, 59, 27, 49, 17, 57, 25],
+      [15, 47, 7, 39, 13, 45, 5, 37],
+      [63, 31, 55, 23, 61, 29, 53, 21],
+    ];
+
+    const RESOLUTION_STEPS = [1, 0.82, 0.66];
+    const BASE_FONT_PX = 12;
+    const AUTO_SPIN = true;
+    const SPIN_SPEED_Y = 0.00042;
+    const SPIN_SPEED_X = 0.00011;
+    const LIGHT_ORBIT_RADIUS = 3.2;
+    const LIGHT_ORBIT_SPEED = 0.58;
+
+    const asciiEl = document.getElementById("ascii-output");
+    const interactionLayer = document.getElementById("interaction-layer");
+    const canvas = document.getElementById("gl-canvas");
+    const densityInput = document.getElementById("char-density");
+    const ditherInput = document.getElementById("dither-strength");
+    const resolutionInput = document.getElementById("resolution-scale");
+    const densityValue = document.getElementById("density-value");
+    const ditherValue = document.getElementById("dither-value");
+    const resolutionValue = document.getElementById("resolution-value");
+    const performanceReadout = document.getElementById("performance-readout");
+
+    const metricsCanvas = document.createElement("canvas");
+    const metricsCtx = metricsCanvas.getContext("2d");
+    if (!metricsCtx) {
+      throw new Error("Could not initialize 2D canvas context for ASCII font metrics.");
+    }
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: false,
+      alpha: true,
+      powerPreference: "high-performance",
+      preserveDrawingBuffer: false,
+    });
+    renderer.setPixelRatio(1);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setClearColor(0x000000, 0);
+
+    const scene = new THREE.Scene();
+    scene.background = null;
+
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+    camera.position.set(2.25, 1.7, 2.4);
+
+    const controls = new OrbitControls(camera, interactionLayer);
+    controls.enablePan = false;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.rotateSpeed = 0.75;
+    controls.minDistance = 2.0;
+    controls.maxDistance = 4.2;
+    controls.target.set(0, 0, 0);
+    controls.update();
+
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 1.2, 1.2),
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color(0xe6f6ff),
+        roughness: 0.24,
+        metalness: 0.12,
+        emissive: new THREE.Color(0x0a2230),
+        emissiveIntensity: 0.04,
+        dithering: true,
+      })
+    );
+    cube.rotation.set(0.55, 0.72, 0);
+    scene.add(cube);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.1);
+    const hemi = new THREE.HemisphereLight(0xdff3ff, 0x041018, 0.16);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.6);
+    keyLight.position.set(2.8, 2.6, 2.4);
+    keyLight.target.position.set(0, 0, 0);
+
+    const fillLight = new THREE.DirectionalLight(0xb8deff, 0.25);
+    fillLight.position.set(-2.6, 1.6, 1.4);
+    fillLight.target.position.set(0, 0, 0);
+
+    const rimLight = new THREE.DirectionalLight(0xaad9ff, 1.1);
+    rimLight.position.set(-2.2, -1.4, -2.8);
+    rimLight.target.position.set(0, 0, 0);
+
+    const sweepLight = new THREE.PointLight(0xffffff, 2.2, 9.0, 1.4);
+    sweepLight.position.set(0, 2.0, 3.0);
+
+    scene.add(
+      ambient,
+      hemi,
+      keyLight,
+      fillLight,
+      rimLight,
+      sweepLight,
+      keyLight.target,
+      fillLight.target,
+      rimLight.target
+    );
+
+    let renderTarget = null;
+    let pixelBuffer = null;
+    let sampleWidth = 0;
+    let sampleHeight = 0;
+    let adaptiveStep = 0;
+
+    let avgFrameMs = 16;
+    let badFrameCount = 0;
+    let goodFrameCount = 0;
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function getActiveRamp(levelCount) {
+      const levels = clamp(Math.round(levelCount), 2, FULL_RAMP.length);
+      if (levels === FULL_RAMP.length) return FULL_RAMP;
+      const ramp = [];
+      for (let i = 0; i < levels; i += 1) {
+        const index = Math.round((i / (levels - 1)) * (FULL_RAMP.length - 1));
+        ramp.push(FULL_RAMP[index]);
+      }
+      return ramp;
+    }
+
+    function measureCharWidth(fontSizePx) {
+      metricsCtx.font = `${fontSizePx}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      return Math.max(1, metricsCtx.measureText("@").width);
+    }
+
+    function getLayout() {
+      const userScale = Number(resolutionInput.value);
+      const effectiveScale = userScale * RESOLUTION_STEPS[adaptiveStep];
+      const fontSize = clamp(BASE_FONT_PX / effectiveScale, 7, 16);
+      const lineHeight = fontSize;
+      const charWidth = measureCharWidth(fontSize);
+
+      const cols = clamp(Math.floor((window.innerWidth - 20) / charWidth), 48, 260);
+      const rows = clamp(Math.floor((window.innerHeight - 20) / lineHeight), 30, 180);
+
+      return { cols, rows, fontSize, lineHeight, userScale };
+    }
+
+    function updatePanelLabels(userScale = Number(resolutionInput.value)) {
+      densityValue.textContent = `${Math.round(Number(densityInput.value))} levels`;
+      ditherValue.textContent = Number(ditherInput.value).toFixed(2);
+      resolutionValue.textContent = `${userScale.toFixed(2)}x`;
+
+      const adaptiveLabel = adaptiveStep === 0 ? "normal" : adaptiveStep === 1 ? "low" : "very low";
+      performanceReadout.textContent =
+        `grid ${sampleWidth}x${sampleHeight} | adaptive ${adaptiveLabel} | frame ${avgFrameMs.toFixed(1)} ms`;
+    }
+
+    function rebuildSampling(force = false) {
+      const layout = getLayout();
+      const cols = layout.cols;
+      const rows = layout.rows;
+
+      asciiEl.style.fontSize = `${layout.fontSize}px`;
+      asciiEl.style.lineHeight = `${layout.lineHeight}px`;
+
+      if (!force && cols === sampleWidth && rows === sampleHeight) {
+        updatePanelLabels(layout.userScale);
+        return;
+      }
+
+      sampleWidth = cols;
+      sampleHeight = rows;
+
+      if (renderTarget) renderTarget.dispose();
+      renderTarget = new THREE.WebGLRenderTarget(sampleWidth, sampleHeight, {
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        depthBuffer: true,
+        stencilBuffer: false,
+      });
+
+      pixelBuffer = new Uint8Array(sampleWidth * sampleHeight * 4);
+      renderer.setSize(sampleWidth, sampleHeight, false);
+      camera.aspect = sampleWidth / sampleHeight;
+      camera.updateProjectionMatrix();
+      updatePanelLabels(layout.userScale);
+    }
+
+    function renderAsciiFrame() {
+      const ditherStrength = Number(ditherInput.value);
+      const ramp = getActiveRamp(Number(densityInput.value));
+      const maxIndex = ramp.length - 1;
+      const lines = new Array(sampleHeight);
+      const alphaCutoff = 0.01;
+
+      for (let displayY = 0; displayY < sampleHeight; displayY += 1) {
+        const sourceY = sampleHeight - 1 - displayY;
+        let line = "";
+
+        for (let x = 0; x < sampleWidth; x += 1) {
+          const index = (sourceY * sampleWidth + x) * 4;
+          const r = pixelBuffer[index] / 255;
+          const g = pixelBuffer[index + 1] / 255;
+          const b = pixelBuffer[index + 2] / 255;
+          const a = pixelBuffer[index + 3] / 255;
+
+          if (a <= alphaCutoff) {
+            line += " ";
+            continue;
+          }
+
+          let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          luminance = clamp((luminance - 0.02) * 1.2, 0, 1);
+          luminance = Math.pow(luminance, 1.28);
+
+          const threshold = ((BAYER8[displayY & 7][x & 7] + 0.5) / 64) - 0.5;
+          const value = clamp(luminance + threshold * ditherStrength, 0, 1);
+          const glyphIndex = Math.min(maxIndex, Math.floor(value * maxIndex + 0.0001));
+
+          line += ramp[glyphIndex];
+        }
+
+        lines[displayY] = line;
+      }
+
+      asciiEl.textContent = lines.join("\n");
+    }
+
+    function updateAdaptiveResolution(dtMs) {
+      avgFrameMs = avgFrameMs * 0.92 + dtMs * 0.08;
+
+      if (avgFrameMs > 34) {
+        badFrameCount += 1;
+        goodFrameCount = 0;
+      } else if (avgFrameMs < 22) {
+        goodFrameCount += 1;
+        badFrameCount = Math.max(0, badFrameCount - 1);
+      } else {
+        badFrameCount = Math.max(0, badFrameCount - 1);
+        goodFrameCount = Math.max(0, goodFrameCount - 1);
+      }
+
+      if (badFrameCount > 24 && adaptiveStep < RESOLUTION_STEPS.length - 1) {
+        adaptiveStep += 1;
+        badFrameCount = 0;
+        goodFrameCount = 0;
+        rebuildSampling(true);
+      }
+
+      if (goodFrameCount > 240 && adaptiveStep > 0) {
+        adaptiveStep -= 1;
+        badFrameCount = 0;
+        goodFrameCount = 0;
+        rebuildSampling(true);
+      }
+    }
+
+    densityInput.addEventListener("input", () => updatePanelLabels());
+    ditherInput.addEventListener("input", () => updatePanelLabels());
+    resolutionInput.addEventListener("input", () => {
+      adaptiveStep = 0;
+      badFrameCount = 0;
+      goodFrameCount = 0;
+      rebuildSampling(true);
+    });
+
+    window.addEventListener("resize", () => rebuildSampling(true));
+
+    rebuildSampling(true);
+
+    let lastTime = performance.now();
+    function animate(now) {
+      const dt = now - lastTime;
+      lastTime = now;
+      const time = now * 0.001;
+
+      controls.update();
+
+      if (AUTO_SPIN) {
+        cube.rotation.y += dt * SPIN_SPEED_Y;
+        cube.rotation.x += dt * SPIN_SPEED_X;
+      }
+
+      // Animated 3-point lighting for more readable depth on all faces.
+      keyLight.position.set(
+        Math.cos(time * LIGHT_ORBIT_SPEED) * LIGHT_ORBIT_RADIUS,
+        2.1 + Math.sin(time * 0.47) * 0.8,
+        Math.sin(time * LIGHT_ORBIT_SPEED) * LIGHT_ORBIT_RADIUS
+      );
+      fillLight.position.set(
+        -Math.cos(time * LIGHT_ORBIT_SPEED + 0.9) * 2.7,
+        1.2 + Math.sin(time * 0.35 + 1.2) * 0.6,
+        -Math.sin(time * LIGHT_ORBIT_SPEED + 0.9) * 2.2
+      );
+      rimLight.position.set(
+        -Math.cos(time * 0.42) * 3.0,
+        -0.8 + Math.sin(time * 0.61) * 0.35,
+        -Math.sin(time * 0.42) * 3.0
+      );
+      sweepLight.position.set(
+        Math.cos(time * 1.35) * 2.1,
+        1.0 + Math.sin(time * 0.85) * 1.25,
+        Math.sin(time * 1.35) * 2.1
+      );
+      keyLight.intensity = 2.2 + Math.sin(time * 0.9) * 0.55;
+
+      renderer.setRenderTarget(renderTarget);
+      renderer.render(scene, camera);
+      renderer.readRenderTargetPixels(renderTarget, 0, 0, sampleWidth, sampleHeight, pixelBuffer);
+      renderer.setRenderTarget(null);
+
+      renderAsciiFrame();
+      updateAdaptiveResolution(dt);
+      updatePanelLabels();
+
+      requestAnimationFrame(animate);
+    }
+
+    requestAnimationFrame(animate);
+  </script>
+
+  <script>
+    window.addEventListener("error", (event) => {
+      const readout = document.getElementById("performance-readout");
+      if (!readout) return;
+      readout.textContent = `Runtime error: ${event.message}`;
+      readout.style.color = "#ff8a8a";
+    });
+
+    window.addEventListener("unhandledrejection", (event) => {
+      const readout = document.getElementById("performance-readout");
+      if (!readout) return;
+      const reason = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+      readout.textContent = `Module error: ${reason}`;
+      readout.style.color = "#ff8a8a";
+    });
+  </script>
+</body>
+</html>

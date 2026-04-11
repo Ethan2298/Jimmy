@@ -1,0 +1,151 @@
+@source "../../../node_modules/streamdown/dist/*.js";
+
+.magi-root {
+  --color-foreground: #f7f8f8;
+  --color-muted-foreground: #8a8f98;
+  --color-border: #1e1e1e;
+  --color-primary: #5e6ad2;
+}
+
+.magi-root,
+.magi-root * {
+  -webkit-font-smoothing: antialiased;
+}
+
+.main-chat-scroll {
+  --chat-fade-height: 28px;
+  --chat-fade-opacity: 0;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, calc(1 - var(--chat-fade-opacity))) 0,
+    rgba(0, 0, 0, calc(1 - 0.55 * var(--chat-fade-opacity))) 12px,
+    #000 var(--chat-fade-height),
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, calc(1 - var(--chat-fade-opacity))) 0,
+    rgba(0, 0, 0, calc(1 - 0.55 * var(--chat-fade-opacity))) 12px,
+    #000 var(--chat-fade-height),
+    #000 100%
+  );
+  scrollbar-width: none;
+}
+
+.main-chat-scroll::-webkit-scrollbar,
+.sidebar-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.sidebar-scroll {
+  --sidebar-fade-height: 28px;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.45) 12px,
+    #000 var(--sidebar-fade-height),
+    #000 calc(100% - var(--sidebar-fade-height)),
+    rgba(0, 0, 0, 0.45) calc(100% - 12px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.45) 12px,
+    #000 var(--sidebar-fade-height),
+    #000 calc(100% - var(--sidebar-fade-height)),
+    rgba(0, 0, 0, 0.45) calc(100% - 12px),
+    transparent 100%
+  );
+  scrollbar-width: none;
+}
+
+.scroll-fade-thumb {
+  width: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34);
+  opacity: 0;
+  transition: opacity 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.scroll-fade-thumb.is-visible {
+  opacity: 1;
+}
+
+[data-streamdown] .streamdown-caret {
+  display: inline-block;
+  width: 1.5px !important;
+  height: 1.05em;
+  vertical-align: text-bottom;
+  background: var(--color-foreground) !important;
+  border-radius: 1px;
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes caret-blink {
+  to { opacity: 0; }
+}
+
+@keyframes thinking-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.thinking-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  border-top-color: var(--color-muted-foreground);
+  border-right-color: var(--color-muted-foreground);
+  animation: thinking-spin 0.8s linear infinite;
+}
+
+.thinking-text {
+  font-size: 13px;
+  color: var(--color-muted-foreground);
+  animation: thinking-pulse 2s ease-in-out infinite;
+}
+
+@keyframes msg-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-msg-enter {
+  animation: msg-enter 150ms ease-out both;
+}
+
+@keyframes msg-send {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-msg-send {
+  animation: msg-send 120ms ease-out both;
+}
+
+[data-streamdown] {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+[data-streamdown] a {
+  color: var(--color-primary);
+}
+
+[data-streamdown] blockquote {
+  border-left-color: var(--color-border);
+  color: var(--color-muted-foreground);
+}
+
+[data-streamdown] hr,
+[data-streamdown] th,
+[data-streamdown] td {
+  border-color: var(--color-border);
+}

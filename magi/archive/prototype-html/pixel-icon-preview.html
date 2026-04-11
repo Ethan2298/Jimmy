@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Pixel Icon — LED Infinity</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px;
+    gap: 24px;
+  }
+  .row { display: flex; gap: 40px; align-items: flex-end; }
+  .demo { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .demo label { font-size: 12px; color: #444; }
+  .controls {
+    display: flex; gap: 14px; align-items: center;
+    flex-wrap: wrap; justify-content: center;
+  }
+  .sg {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; color: #666;
+  }
+  input[type="range"] { width: 80px; }
+  button {
+    background: #181818; color: #999; border: 1px solid #2a2a2a;
+    padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: 12px;
+  }
+  button:hover { background: #222; }
+  button.on { background: #a08520; border-color: #a08520; color: #fff; }
+  h2 { margin: 0; font-size: 18px; color: #ccc; }
+</style>
+</head>
+<body>
+
+<h2>LED Infinity</h2>
+
+<div class="controls">
+  <div class="sg">
+    Grid:
+    <button onclick="setGrid(7,7)" id="g77">7</button>
+    <button onclick="setGrid(9,9)" id="g99">9</button>
+    <button onclick="setGrid(11,11)" id="g1111" class="on">11</button>
+    <button onclick="setGrid(13,13)" id="g1313">13</button>
+    <button onclick="setGrid(15,15)" id="g1515">15</button>
+    <button onclick="setGrid(17,17)" id="g1717">17</button>
+  </div>
+  <div class="sg">
+    <span>Speed:</span>
+    <input type="range" min="0.3" max="4" step="0.1" value="1.5" oninput="cfg.speed=+this.value;$('lSpd').textContent=this.value+'x'">
+    <span id="lSpd">1.5x</span>
+  </div>
+  <div class="sg">
+    <span>Length:</span>
+    <input type="range" min="2" max="30" value="10" oninput="cfg.snakeLen=+this.value;$('lLen').textContent=this.value">
+    <span id="lLen">10</span>
+  </div>
+  <div class="sg">
+    <span>Glow:</span>
+    <input type="range" min="0" max="5" step="0.5" value="2.5" oninput="cfg.glow=+this.value;$('lGlow').textContent=this.value">
+    <span id="lGlow">2.5</span>
+  </div>
+  <div class="sg">
+    <span>Gap:</span>
+    <input type="range" min="0" max="50" step="1" value="20" oninput="cfg.gapPct=+this.value;$('lGap').textContent=this.value+'%'">
+    <span id="lGap">20%</span>
+  </div>
+  <div class="sg">
+    <span>Radius:</span>
+    <input type="range" min="0" max="50" value="30" oninput="cfg.radius=+this.value;$('lRad').textContent=this.value+'%'">
+    <span id="lRad">30%</span>
+  </div>
+</div>
+
+<div class="row" id="renders"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+const cfg = {
+  speed: 1.5,
+  snakeLen: 10,
+  gapPct: 20, // gap as % of cell size
+  glow: 2.5,
+  radius: 30, // % of cell size
+  gridW: 11,
+  gridH: 11,
+};
+
+// --- Lemniscate path ---
+function computePath(gridW, gridH) {
+  const cx = (gridW - 1) / 2;
+  const cy = (gridH - 1) / 2;
+  const sx = cx * 0.95;
+  const sy = cy * 0.85;
+  const samples = 800;
+  const path = [];
+  let lastKey = null;
+
+  for (let i = 0; i < samples; i++) {
+    const t = (i / samples) * Math.PI * 2;
+    const sinT = Math.sin(t);
+    const cosT = Math.cos(t);
+    const d = 1 + sinT * sinT;
+    const gx = Math.round(cx + sx * cosT / d);
+    const gy = Math.round(cy + sy * sinT * cosT / d);
+    const key = gx + "," + gy;
+    if (key !== lastKey) {
+      path.push({ x: gx, y: gy });
+      lastKey = key;
+    }
+  }
+  while (path.length > 1 && path[path.length - 1].x === path[0].x && path[path.length - 1].y === path[0].y) path.pop();
+  return path;
+}
+
+let path = computePath(cfg.gridW, cfg.gridH);
+let headPos = 0;
+
+function setGrid(w, h) {
+  cfg.gridW = w; cfg.gridH = h;
+  path = computePath(w, h);
+  headPos = 0;
+  document.querySelectorAll('.controls button[id^="g"]').forEach(b => b.classList.remove('on'));
+  const btn = $("g" + w + "" + h);
+  if (btn) btn.classList.add('on');
+  buildCanvases();
+}
+
+// --- Canvas setup ---
+const SIZES = [20, 32, 48, 80, 160, 280];
+
+function buildCanvases() {
+  const container = $("renders");
+  container.innerHTML = "";
+  for (const size of SIZES) {
+    const wrap = document.createElement("div");
+    wrap.className = "demo";
+    const c = document.createElement("canvas");
+    // Use 2x resolution for crisp rendering
+    const dpr = window.devicePixelRatio || 1;
+    c.width = size * dpr;
+    c.height = size * dpr;
+    c.style.width = size + "px";
+    c.style.height = size + "px";
+    c.id = "cv" + size;
+    const lbl = document.createElement("label");
+    lbl.textContent = size + "px";
+    wrap.appendChild(c);
+    wrap.appendChild(lbl);
+    container.appendChild(wrap);
+  }
+}
+buildCanvases();
+
+// --- LED drawing ---
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawGrid(canvas, displaySize) {
+  const dpr = window.devicePixelRatio || 1;
+  const size = displaySize * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, size, size);
+
+  const gw = cfg.gridW;
+  const gh = cfg.gridH;
+  const gapRatio = cfg.gapPct / 100;
+
+  // cellSize + gap scale together so it always fits
+  // size = n * cellSize + (n-1) * gap, where gap = gapRatio * cellSize
+  // size = cellSize * (n + (n-1) * gapRatio)
+  const cellSize = Math.min(
+    size / (gw + (gw - 1) * gapRatio),
+    size / (gh + (gh - 1) * gapRatio),
+  );
+  const gap = cellSize * gapRatio;
+  const totalW = gw * cellSize + (gw - 1) * gap;
+  const totalH = gh * cellSize + (gh - 1) * gap;
+  const ox = (size - totalW) / 2;
+  const oy = (size - totalH) / 2;
+  const r = cellSize * (cfg.radius / 100);
+
+  // Build snake lookup
+  const snakeMap = {};
+  const len = path.length;
+  for (let i = 0; i < cfg.snakeLen; i++) {
+    const idx = ((Math.floor(headPos) - i) % len + len) % len;
+    const cell = path[idx];
+    const key = cell.x + "," + cell.y;
+    if (snakeMap[key] === undefined) {
+      snakeMap[key] = i;
+    }
+  }
+
+  // Path lookup
+  const pathSet = new Set();
+  for (const p of path) pathSet.add(p.x + "," + p.y);
+
+  // --- Draw glow layer first (behind everything) ---
+  ctx.save();
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      const key = gx + "," + gy;
+      const snakeIdx = snakeMap[key];
+      if (snakeIdx === undefined) continue;
+
+      const brightness = 1 - (snakeIdx / cfg.snakeLen);
+      const px = ox + gx * (cellSize + gap);
+      const py = oy + gy * (cellSize + gap);
+      const cx = px + cellSize / 2;
+      const cy = py + cellSize / 2;
+
+      const glowRadius = cellSize * cfg.glow;
+      if (glowRadius < 1) continue;
+
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowRadius);
+      // Yellow glow
+      const alpha = brightness * 0.4;
+      grad.addColorStop(0, `rgba(255, 220, 60, ${alpha})`);
+      grad.addColorStop(0.4, `rgba(255, 200, 30, ${alpha * 0.4})`);
+      grad.addColorStop(1, `rgba(255, 180, 0, 0)`);
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(cx - glowRadius, cy - glowRadius, glowRadius * 2, glowRadius * 2);
+    }
+  }
+  ctx.restore();
+
+  // --- Draw cells ---
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      const px = ox + gx * (cellSize + gap);
+      const py = oy + gy * (cellSize + gap);
+      const key = gx + "," + gy;
+      const isOnPath = pathSet.has(key);
+      const snakeIdx = snakeMap[key];
+
+      if (snakeIdx !== undefined) {
+        // Lit LED
+        const brightness = 1 - (snakeIdx / cfg.snakeLen);
+        const b = brightness;
+
+        // LED body — bright yellow core
+        roundRect(ctx, px, py, cellSize, cellSize, r);
+        // Base color: warm yellow, brighter toward head
+        const red = Math.round(180 + 75 * b);
+        const green = Math.round(140 + 80 * b);
+        const blue = Math.round(10 + 30 * b);
+        ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+        ctx.fill();
+
+        // Hot center highlight
+        if (b > 0.3) {
+          const hx = px + cellSize / 2;
+          const hy = py + cellSize / 2;
+          const hr = cellSize * 0.35;
+          const hGrad = ctx.createRadialGradient(hx, hy, 0, hx, hy, hr);
+          hGrad.addColorStop(0, `rgba(255, 255, 200, ${b * 0.7})`);
+          hGrad.addColorStop(1, `rgba(255, 255, 200, 0)`);
+          ctx.fillStyle = hGrad;
+          roundRect(ctx, px, py, cellSize, cellSize, r);
+          ctx.fill();
+        }
+      } else {
+        // Unlit LED — dark cavity
+        roundRect(ctx, px, py, cellSize, cellSize, r);
+        ctx.fillStyle = isOnPath ? "#1a1a18" : "#141413";
+        ctx.fill();
+
+        // Subtle inner bevel to look like a recessed socket
+        if (cellSize > 3) {
+          const inset = cellSize * 0.15;
+          roundRect(ctx, px + inset, py + inset, cellSize - inset * 2, cellSize - inset * 2, Math.max(0, r - inset));
+          ctx.fillStyle = isOnPath ? "#1e1e1b" : "#181817";
+          ctx.fill();
+        }
+      }
+    }
+  }
+}
+
+let lastTime = 0;
+function animate(time) {
+  if (!lastTime) lastTime = time;
+  const dt = Math.min(time - lastTime, 50) / 1000;
+  lastTime = time;
+
+  headPos += dt * cfg.speed * 6;
+  if (headPos >= path.length) headPos -= path.length;
+
+  for (const size of SIZES) {
+    const c = $("cv" + size);
+    if (c) drawGrid(c, size);
+  }
+
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

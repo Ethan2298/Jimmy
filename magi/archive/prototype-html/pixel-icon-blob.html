@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pixel Icon — Amorphous Blob Animations (7×7)</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,sans-serif;background:#111;color:#eee;padding:24px}
+  h1{text-align:center;margin-bottom:8px;font-size:1.4rem;font-weight:600}
+  .sub{text-align:center;color:#888;margin-bottom:24px;font-size:.85rem}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:20px}
+  .card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px}
+  .card-header{display:flex;justify-content:space-between;align-items:center}
+  .card-title{font-weight:600;font-size:.95rem}
+  .btn{background:#333;color:#eee;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:.8rem}
+  .btn:hover{background:#444}
+  .btn.active{background:#5B8FB9;color:#fff}
+  .canvas-row{display:flex;gap:12px;justify-content:center;align-items:center}
+  canvas{border-radius:6px;image-rendering:pixelated}
+  .sliders{display:flex;flex-direction:column;gap:6px}
+  .slider-row{display:flex;align-items:center;gap:8px;font-size:.75rem}
+  .slider-row label{min-width:70px;color:#999}
+  .slider-row input[type=range]{flex:1;accent-color:#5B8FB9}
+  .slider-row .val{min-width:36px;text-align:right;color:#bbb}
+  .copy-btn{align-self:flex-end;font-size:.7rem;padding:2px 8px}
+</style>
+</head>
+<body>
+<h1>Amorphous / Full-Grid Idle Animations</h1>
+<p class="sub">Dense, organic, intelligent-feeling — orange #E8863A + blue #5B8FB9</p>
+<div class="grid" id="grid"></div>
+
+<script>
+const G = 7;
+const COL_O = [232, 134, 58];
+const COL_B = [91, 143, 185];
+const COL_W = [240, 230, 220];
+
+/* ── helpers ── */
+function lerp(a,b,t){return a+(b-a)*t}
+function clamp(v,lo=0,hi=1){return Math.max(lo,Math.min(hi,v))}
+function sigmoid(x,k=8){return 1/(1+Math.exp(-k*(x-0.5)))}
+function noise2d(x,y,seed=0){
+  const n=Math.sin(x*127.1+y*311.7+seed*113.3)*43758.5453;
+  return n-Math.floor(n);
+}
+function smoothNoise(x,y,seed){
+  const ix=Math.floor(x),iy=Math.floor(y);
+  const fx=x-ix,fy=y-iy;
+  const sx=fx*fx*(3-2*fx),sy=fy*fy*(3-2*fy);
+  const n00=noise2d(ix,iy,seed),n10=noise2d(ix+1,iy,seed);
+  const n01=noise2d(ix,iy+1,seed),n11=noise2d(ix+1,iy+1,seed);
+  return lerp(lerp(n00,n10,sx),lerp(n01,n11,sx),sy);
+}
+function fbm(x,y,seed,oct=3){
+  let v=0,amp=0.5,freq=1;
+  for(let i=0;i<oct;i++){v+=amp*smoothNoise(x*freq,y*freq,seed+i*17);amp*=0.5;freq*=2}
+  return v;
+}
+
+/* ── animations ── */
+const animations = [
+
+{ name:"Living Plasma", desc:"Dense plasma fills grid, organic shifts",
+  params:{speed:{min:0.2,max:3,step:0.1,def:0.8},density:{min:0.2,max:1,step:0.05,def:0.7},contrast:{min:1,max:12,step:0.5,def:6}},
+  fn(t,p){
+    const cells=new Map();
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const nx=x/G,ny=y/G;
+      const v1=Math.sin(nx*4+t*p.speed)*Math.cos(ny*3-t*p.speed*0.7);
+      const v2=Math.sin((nx+ny)*3+t*p.speed*1.3);
+      const v3=Math.cos(nx*2-ny*2+t*p.speed*0.5);
+      const raw=(v1+v2+v3)/3*0.5+0.5;
+      const br=clamp(raw*p.density*1.5);
+      if(br>0.08){
+        const pick=sigmoid(Math.sin(nx*5+t*p.speed*0.3)*0.5+0.5,p.contrast);
+        const r=lerp(COL_O[0],COL_B[0],pick);
+        const g=lerp(COL_O[1],COL_B[1],pick);
+        const b=lerp(COL_O[2],COL_B[2],pick);
+        cells.set(`${x},${y}`,{brightness:br,r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Breathing Orb", desc:"Large orb fills grid, breathes with color shift",
+  params:{speed:{min:0.3,max:3,step:0.1,def:0.7},size:{min:1.5,max:4,step:0.1,def:3.2},softness:{min:0.5,max:3,step:0.1,def:1.5}},
+  fn(t,p){
+    const cells=new Map();
+    const cx=3,cy=3;
+    const breathe=Math.sin(t*p.speed)*0.3;
+    const radius=p.size+breathe;
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const dist=Math.sqrt((x-cx)**2+(y-cy)**2);
+      const br=clamp(1-dist/(radius*p.softness/1.5));
+      if(br>0.05){
+        const angle=Math.atan2(y-cy,x-cx);
+        const colorShift=Math.sin(angle*2+t*p.speed*0.5)*0.5+0.5;
+        const pick=sigmoid(colorShift,6);
+        const r=lerp(COL_O[0],COL_B[0],pick);
+        const g=lerp(COL_O[1],COL_B[1],pick);
+        const b=lerp(COL_O[2],COL_B[2],pick);
+        cells.set(`${x},${y}`,{brightness:br,r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Amoeba", desc:"Organic shape with pseudopods, fills ~70% of grid",
+  params:{speed:{min:0.3,max:2,step:0.1,def:0.6},complexity:{min:2,max:6,step:0.5,def:3},fill:{min:0.3,max:1,step:0.05,def:0.75}},
+  fn(t,p){
+    const cells=new Map();
+    const cx=3,cy=3;
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const angle=Math.atan2(y-cy,x-cx);
+      const dist=Math.sqrt((x-cx)**2+(y-cy)**2);
+      let radius=2.5*p.fill;
+      for(let k=1;k<=p.complexity;k++){
+        radius+=Math.sin(angle*k+t*p.speed*(1+k*0.3))*0.4/k;
+      }
+      const edge=clamp(1-(dist-radius)*1.5);
+      if(edge>0.05){
+        const inner=clamp(1-dist/3.5);
+        const br=edge*0.6+inner*0.4;
+        const colorWave=Math.sin(angle+t*p.speed*0.4)*0.5+0.5;
+        const r=lerp(COL_O[0],COL_B[0],colorWave);
+        const g=lerp(COL_O[1],COL_B[1],colorWave);
+        const b=lerp(COL_O[2],COL_B[2],colorWave);
+        cells.set(`${x},${y}`,{brightness:clamp(br),r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Nebula", desc:"Space-like gas cloud with drifting density",
+  params:{speed:{min:0.1,max:2,step:0.1,def:0.4},scale:{min:0.5,max:3,step:0.1,def:1.2},brightness:{min:0.3,max:1,step:0.05,def:0.8}},
+  fn(t,p){
+    const cells=new Map();
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const nx=x/G*p.scale,ny=y/G*p.scale;
+      const n1=fbm(nx+t*p.speed*0.3,ny+t*p.speed*0.2,0);
+      const n2=fbm(nx-t*p.speed*0.2,ny+t*p.speed*0.15,50);
+      const density=clamp((n1+n2)*p.brightness);
+      if(density>0.06){
+        const pick=sigmoid(n1/(n1+n2+0.001),8);
+        const r=lerp(COL_O[0],COL_B[0],pick);
+        const g=lerp(COL_O[1],COL_B[1],pick);
+        const b=lerp(COL_O[2],COL_B[2],pick);
+        cells.set(`${x},${y}`,{brightness:density,r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Liquid Surface", desc:"Like looking down at shifting liquid",
+  params:{speed:{min:0.2,max:2,step:0.1,def:0.5},turbulence:{min:1,max:5,step:0.5,def:2.5},fill:{min:0.4,max:1,step:0.05,def:0.85}},
+  fn(t,p){
+    const cells=new Map();
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const nx=x/G,ny=y/G;
+      const warp1=Math.sin(nx*p.turbulence+t*p.speed)*0.3;
+      const warp2=Math.cos(ny*p.turbulence-t*p.speed*0.8)*0.3;
+      const v=fbm(nx+warp1,ny+warp2,t*p.speed*0.5);
+      const br=clamp(v*p.fill*1.6);
+      if(br>0.05){
+        const colorField=Math.sin((nx+warp1)*3+t*p.speed*0.3)*0.5+0.5;
+        const pick=sigmoid(colorField,6);
+        const r=lerp(COL_O[0],COL_B[0],pick);
+        const g=lerp(COL_O[1],COL_B[1],pick);
+        const b=lerp(COL_O[2],COL_B[2],pick);
+        cells.set(`${x},${y}`,{brightness:br,r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Morphing Core", desc:"Dense bright core with shifting tendrils",
+  params:{speed:{min:0.2,max:2,step:0.1,def:0.5},arms:{min:2,max:6,step:1,def:3},glow:{min:0.5,max:2,step:0.1,def:1.2}},
+  fn(t,p){
+    const cells=new Map();
+    const cx=3,cy=3;
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const dx=x-cx,dy=y-cy;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      const angle=Math.atan2(dy,dx);
+      // Core
+      const core=clamp(1-dist/2)*p.glow;
+      // Tendrils
+      let tendril=0;
+      for(let a=0;a<p.arms;a++){
+        const armAngle=(a/p.arms)*Math.PI*2+t*p.speed;
+        const diff=Math.abs(Math.sin((angle-armAngle)/2));
+        const armWidth=0.3+Math.sin(t*p.speed*1.5+a)*0.1;
+        if(diff<armWidth){
+          const strength=(1-diff/armWidth)*clamp(1-dist/4)*0.7;
+          tendril=Math.max(tendril,strength);
+        }
+      }
+      const br=clamp(core+tendril);
+      if(br>0.05){
+        const colorAngle=Math.sin(angle*2+t*p.speed*0.6)*0.5+0.5;
+        const pick=sigmoid(colorAngle,5);
+        const r=lerp(COL_O[0],COL_B[0],pick);
+        const g=lerp(COL_O[1],COL_B[1],pick);
+        const b=lerp(COL_O[2],COL_B[2],pick);
+        cells.set(`${x},${y}`,{brightness:br,r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Cloud Drift", desc:"Soft cloud that slowly drifts and reforms",
+  params:{speed:{min:0.1,max:1.5,step:0.05,def:0.3},density:{min:0.4,max:1,step:0.05,def:0.8},softness:{min:1,max:4,step:0.5,def:2}},
+  fn(t,p){
+    const cells=new Map();
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const nx=(x+t*p.speed*2)/G*p.softness;
+      const ny=y/G*p.softness;
+      const n=fbm(nx,ny,100,4);
+      const edgeFade=1-Math.max(Math.abs(x-3),Math.abs(y-3))/4.5;
+      const br=clamp(n*p.density*1.8*clamp(edgeFade));
+      if(br>0.05){
+        const colorN=fbm(nx*0.5,ny*0.5,200);
+        const pick=sigmoid(colorN,4);
+        const r=lerp(COL_O[0],COL_B[0],pick);
+        const g=lerp(COL_O[1],COL_B[1],pick);
+        const b=lerp(COL_O[2],COL_B[2],pick);
+        cells.set(`${x},${y}`,{brightness:br,r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Neural Net", desc:"Nodes pulse and connections glow between them",
+  params:{speed:{min:0.3,max:2,step:0.1,def:0.7},nodes:{min:3,max:7,step:1,def:5},linkGlow:{min:0.2,max:1,step:0.05,def:0.5}},
+  fn(t,p){
+    const cells=new Map();
+    // Generate stable node positions
+    const nodePos=[];
+    for(let i=0;i<p.nodes;i++){
+      const px=1+Math.sin(i*2.39+t*p.speed*0.2)*2;
+      const py=1+Math.cos(i*3.17+t*p.speed*0.15)*2;
+      nodePos.push([clamp(px,0,6),clamp(py,0,6)]);
+    }
+    // Draw connections
+    for(let i=0;i<nodePos.length;i++)for(let j=i+1;j<nodePos.length;j++){
+      const [x1,y1]=nodePos[i],[x2,y2]=nodePos[j];
+      const nodeDist=Math.sqrt((x2-x1)**2+(y2-y1)**2);
+      if(nodeDist>5) continue;
+      const pulse=Math.sin(t*p.speed*3+i+j)*0.5+0.5;
+      for(let s=0;s<=1;s+=0.15){
+        const lx=lerp(x1,x2,s),ly=lerp(y1,y2,s);
+        const gx=Math.round(lx),gy=Math.round(ly);
+        if(gx>=0&&gx<G&&gy>=0&&gy<G){
+          const key=`${gx},${gy}`;
+          const br=p.linkGlow*pulse*0.6;
+          const existing=cells.get(key);
+          if(!existing||existing.brightness<br){
+            cells.set(key,{brightness:br,r:COL_B[0],g:COL_B[1],b:COL_B[2]});
+          }
+        }
+      }
+    }
+    // Draw nodes
+    for(let i=0;i<nodePos.length;i++){
+      const [nx,ny]=nodePos[i];
+      const pulse=Math.sin(t*p.speed*2+i*1.5)*0.3+0.7;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+        const gx=Math.round(nx)+dx,gy=Math.round(ny)+dy;
+        if(gx<0||gx>=G||gy<0||gy>=G) continue;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+        const br=clamp(pulse*(1-dist*0.5));
+        if(br>0.05){
+          const key=`${gx},${gy}`;
+          const col=i%2===0?COL_O:COL_B;
+          const existing=cells.get(key);
+          if(!existing||existing.brightness<br){
+            cells.set(key,{brightness:br,r:col[0],g:col[1],b:col[2]});
+          }
+        }
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Magma Flow", desc:"Hot dense magma oozing and glowing",
+  params:{speed:{min:0.2,max:2,step:0.1,def:0.4},heat:{min:0.4,max:1,step:0.05,def:0.85},flow:{min:0.5,max:3,step:0.1,def:1.5}},
+  fn(t,p){
+    const cells=new Map();
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const nx=x/G,ny=y/G;
+      const flow1=Math.sin(nx*p.flow*3+t*p.speed+ny*2)*0.4;
+      const flow2=Math.cos(ny*p.flow*2.5-t*p.speed*0.6+nx)*0.3;
+      const base=fbm(nx+flow1,ny+flow2,t*p.speed*0.3);
+      const hot=Math.sin(t*p.speed*1.5+x*0.5+y*0.7)*0.2+0.8;
+      const br=clamp(base*p.heat*hot*1.5);
+      if(br>0.05){
+        // Hotter = more orange, cooler = more blue
+        const temp=clamp(br/p.heat);
+        const r=lerp(COL_B[0],COL_O[0],temp);
+        const g=lerp(COL_B[1],COL_O[1],temp);
+        const b=lerp(COL_B[2],COL_O[2],temp);
+        cells.set(`${x},${y}`,{brightness:br,r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Cellular", desc:"Cells divide and merge organically",
+  params:{speed:{min:0.2,max:2,step:0.1,def:0.5},count:{min:2,max:5,step:1,def:3},size:{min:1,max:3,step:0.1,def:1.8}},
+  fn(t,p){
+    const cells=new Map();
+    const blobs=[];
+    for(let i=0;i<p.count;i++){
+      const phase=i*Math.PI*2/p.count;
+      blobs.push({
+        x:3+Math.sin(phase+t*p.speed*0.7)*2,
+        y:3+Math.cos(phase*1.3+t*p.speed*0.5)*2,
+        r:p.size+Math.sin(t*p.speed+i)*0.4,
+        col:i%2===0?COL_O:COL_B
+      });
+    }
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      let totalField=0;
+      let rSum=0,gSum=0,bSum=0,wSum=0;
+      for(const blob of blobs){
+        const dist=Math.sqrt((x-blob.x)**2+(y-blob.y)**2);
+        const field=blob.r*blob.r/(dist*dist+0.5);
+        totalField+=field;
+        rSum+=blob.col[0]*field;
+        gSum+=blob.col[1]*field;
+        bSum+=blob.col[2]*field;
+        wSum+=field;
+      }
+      const br=clamp(totalField*0.3);
+      if(br>0.08){
+        cells.set(`${x},${y}`,{brightness:br,r:rSum/wSum,g:gSum/wSum,b:bSum/wSum});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Tide Pool", desc:"Organic shapes lap and shift like tidal pools",
+  params:{speed:{min:0.1,max:1.5,step:0.05,def:0.35},layers:{min:2,max:5,step:1,def:3},fill:{min:0.5,max:1,step:0.05,def:0.8}},
+  fn(t,p){
+    const cells=new Map();
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      let br=0;
+      let colR=0,colG=0,colB=0;
+      for(let l=0;l<p.layers;l++){
+        const phase=l*Math.PI*2/p.layers;
+        const nx=(x/G+Math.sin(t*p.speed+phase)*0.2)*3;
+        const ny=(y/G+Math.cos(t*p.speed*0.8+phase)*0.2)*3;
+        const v=fbm(nx,ny,l*37+t*p.speed*0.2);
+        const layerBr=clamp(v*p.fill)*0.5;
+        const col=l%2===0?COL_O:COL_B;
+        br+=layerBr;
+        colR+=col[0]*layerBr;
+        colG+=col[1]*layerBr;
+        colB+=col[2]*layerBr;
+      }
+      br=clamp(br);
+      if(br>0.08){
+        cells.set(`${x},${y}`,{brightness:br,r:colR/br/p.layers,g:colG/br/p.layers,b:colB/br/p.layers});
+      }
+    }
+    return cells;
+  }
+},
+
+{ name:"Sentient Glow", desc:"Aware presence — watches, shifts, breathes",
+  params:{speed:{min:0.2,max:1.5,step:0.05,def:0.4},awareness:{min:0.5,max:2,step:0.1,def:1},warmth:{min:0,max:1,step:0.05,def:0.5}},
+  fn(t,p){
+    const cells=new Map();
+    const cx=3+Math.sin(t*p.speed*0.5)*0.5;
+    const cy=3+Math.cos(t*p.speed*0.4)*0.5;
+    const breathe=Math.sin(t*p.speed)*0.15+0.85;
+    for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+      const dx=x-cx,dy=y-cy;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      const angle=Math.atan2(dy,dx);
+      // Base glow fills most of grid
+      const baseGlow=clamp(1-dist/4.5)*breathe;
+      // Organic edge variation
+      const edgeWobble=Math.sin(angle*3+t*p.speed)*0.15+Math.sin(angle*5-t*p.speed*1.3)*0.1;
+      const edge=clamp(1-(dist-(3+edgeWobble))*p.awareness);
+      const br=clamp(baseGlow*0.7+edge*0.4);
+      if(br>0.04){
+        // Color: warm center, cool edges
+        const centerBlend=clamp(1-dist/3);
+        const colorT=lerp(1-p.warmth,p.warmth,centerBlend);
+        const r=lerp(COL_B[0],COL_O[0],colorT);
+        const g=lerp(COL_B[1],COL_O[1],colorT);
+        const b=lerp(COL_B[2],COL_O[2],colorT);
+        cells.set(`${x},${y}`,{brightness:br,r,g,b});
+      }
+    }
+    return cells;
+  }
+},
+
+];
+
+/* ── renderer ── */
+function drawLEDFrame(ctx,w,cells,dark){
+  const cell=w/G;
+  ctx.clearRect(0,0,w,w);
+  if(dark) ctx.fillStyle='#111'; else ctx.fillStyle='#f5f5f5';
+  ctx.fillRect(0,0,w,w);
+  for(let y=0;y<G;y++)for(let x=0;x<G;x++){
+    const key=`${x},${y}`;
+    const st=cells.get(key);
+    const cx_=x*cell+cell/2, cy_=y*cell+cell/2, r=cell*0.38;
+    if(st&&st.brightness>0.01){
+      const br=clamp(st.brightness);
+      if(dark){
+        if(br>0.3){
+          const grad=ctx.createRadialGradient(cx_,cy_,r*0.2,cx_,cy_,r*2.5);
+          grad.addColorStop(0,`rgba(${st.r|0},${st.g|0},${st.b|0},${br*0.25})`);
+          grad.addColorStop(1,`rgba(${st.r|0},${st.g|0},${st.b|0},0)`);
+          ctx.fillStyle=grad;
+          ctx.fillRect(x*cell,y*cell,cell,cell);
+        }
+        ctx.beginPath();ctx.arc(cx_,cy_,r,0,Math.PI*2);
+        ctx.fillStyle=`rgba(${st.r|0},${st.g|0},${st.b|0},${0.15+br*0.85})`;
+        ctx.fill();
+      } else {
+        ctx.beginPath();ctx.arc(cx_,cy_,r,0,Math.PI*2);
+        ctx.fillStyle=`rgba(${st.r|0},${st.g|0},${st.b|0},${br*0.9})`;
+        ctx.fill();
+      }
+    } else {
+      ctx.beginPath();ctx.arc(cx_,cy_,r,0,Math.PI*2);
+      ctx.fillStyle=dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.06)';
+      ctx.fill();
+    }
+  }
+}
+
+/* ── build cards ── */
+const gridEl=document.getElementById('grid');
+const states=[];
+
+animations.forEach((anim,idx)=>{
+  const card=document.createElement('div');card.className='card';
+
+  // Header
+  const hdr=document.createElement('div');hdr.className='card-header';
+  const title=document.createElement('div');title.className='card-title';title.textContent=anim.name;
+  const playBtn=document.createElement('button');playBtn.className='btn';playBtn.textContent='Play';
+  hdr.append(title,playBtn);
+
+  const desc=document.createElement('div');desc.style.cssText='font-size:.75rem;color:#888';desc.textContent=anim.desc;
+
+  // Canvases
+  const crow=document.createElement('div');crow.className='canvas-row';
+  const cDark=document.createElement('canvas');cDark.width=140;cDark.height=140;cDark.style.cssText='width:70px;height:70px;background:#111;border:1px solid #333';
+  const cLight=document.createElement('canvas');cLight.width=140;cLight.height=140;cLight.style.cssText='width:70px;height:70px;background:#f5f5f5;border:1px solid #ddd';
+  crow.append(cDark,cLight);
+
+  // Sliders
+  const sliders=document.createElement('div');sliders.className='sliders';
+  const paramValues={};
+  if(anim.params){
+    for(const[k,cfg] of Object.entries(anim.params)){
+      paramValues[k]=cfg.def;
+      const row=document.createElement('div');row.className='slider-row';
+      const lbl=document.createElement('label');lbl.textContent=k;
+      const inp=document.createElement('input');inp.type='range';inp.min=cfg.min;inp.max=cfg.max;inp.step=cfg.step;inp.value=cfg.def;
+      const val=document.createElement('span');val.className='val';val.textContent=cfg.def;
+      inp.oninput=()=>{paramValues[k]=parseFloat(inp.value);val.textContent=inp.value};
+      row.append(lbl,inp,val);
+      sliders.append(row);
+    }
+  }
+
+  // Copy button
+  const copyBtn=document.createElement('button');copyBtn.className='btn copy-btn';copyBtn.textContent='Copy Code';
+  copyBtn.onclick=()=>{
+    const paramStr=Object.entries(paramValues).map(([k,v])=>`  const ${k} = ${v};`).join('\n');
+    const code=`// ${anim.name}\n${paramStr}\n\n${anim.fn.toString()}`;
+    navigator.clipboard.writeText(code);
+    copyBtn.textContent='Copied!';
+    setTimeout(()=>copyBtn.textContent='Copy Code',1500);
+  };
+
+  card.append(hdr,desc,crow,sliders,copyBtn);
+  gridEl.append(card);
+
+  const state={playing:false,anim,paramValues,ctxDark:cDark.getContext('2d'),ctxLight:cLight.getContext('2d'),raf:null};
+  states.push(state);
+
+  playBtn.onclick=()=>{
+    state.playing=!state.playing;
+    playBtn.textContent=state.playing?'Pause':'Play';
+    playBtn.classList.toggle('active',state.playing);
+  };
+
+  // Draw initial frame
+  const initCells=anim.fn(0,paramValues);
+  drawLEDFrame(state.ctxDark,140,initCells,true);
+  drawLEDFrame(state.ctxLight,140,initCells,false);
+});
+
+let start=null;
+function tick(ts){
+  if(!start)start=ts;
+  const t=(ts-start)/1000;
+  for(const s of states){
+    if(!s.playing) continue;
+    const cells=s.anim.fn(t,s.paramValues);
+    drawLEDFrame(s.ctxDark,140,cells,true);
+    drawLEDFrame(s.ctxLight,140,cells,false);
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
