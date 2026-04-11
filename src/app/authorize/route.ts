@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  if (!clientId || !timingSafeCompare(clientId, OAUTH_CLIENT_ID)) {
+  if (!clientId) {
     return NextResponse.json({ error: "invalid_client" }, { status: 400 });
   }
 

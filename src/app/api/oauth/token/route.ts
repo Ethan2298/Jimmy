@@ -38,12 +38,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!clientId || !timingSafeCompare(clientId, OAUTH_CLIENT_ID)) {
-    return NextResponse.json({ error: "invalid_client" }, { status: 401 });
-  }
-
-  // Client secret is optional when PKCE is used
-  if (clientSecret && !timingSafeCompare(clientSecret, OAUTH_CLIENT_SECRET)) {
+  if (!clientId) {
     return NextResponse.json({ error: "invalid_client" }, { status: 401 });
   }
 
