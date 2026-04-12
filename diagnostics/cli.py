@@ -346,8 +346,8 @@ def build_session_report(events: list[MCPEvent], *, session_id: str) -> dict[str
     total_duration = sum(e.duration_ms for e in sorted_events)
     success_count = sum(1 for e in sorted_events if e.success)
     tool_sequence = [e.tool_name for e in sorted_events]
-    actors = list({e.actor for e in sorted_events})
-    integrations = list({e.integration_category for e in sorted_events})
+    actors = sorted({e.actor for e in sorted_events})
+    integrations = sorted({e.integration_category for e in sorted_events})
     first_ts = sorted_events[0].timestamp if sorted_events else None
     last_ts = sorted_events[-1].timestamp if sorted_events else None
     return {
@@ -733,7 +733,6 @@ def build_inspector_command(
         if token:
             env["MCP_HEADERS"] = json.dumps({"Authorization": f"Bearer {token}"})
     else:
-        server_module = os.path.join(PROJECT_ROOT, "mcp_servers", "ghl", "server.py")
         cmd = [npx, "@modelcontextprotocol/inspector", sys.executable, "-m", "mcp_servers.ghl.server"]
         env.setdefault("GHL_API_KEY", os.getenv("GHL_API_KEY", ""))
         env.setdefault("GHL_LOCATION_ID", os.getenv("GHL_LOCATION_ID", ""))
@@ -856,6 +855,7 @@ async def _load_events(
     store: MCPEventStore,
     *,
     days: int | None = None,
+    until: datetime | None = None,
     limit: int,
     actor: str | None = None,
     integration: str | None = None,
@@ -869,6 +869,7 @@ async def _load_events(
     query = MCPEventQuery(
         request_id=request_id,
         since=since,
+        until=until,
         actor=actor,
         integration_category=integration,
         tool_name=tool_name,
@@ -996,6 +997,7 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
     if args.command == "anomalies":
         if not store_configured:
             raise RuntimeError("Supabase event store is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+        # Current window: last N days
         current_events = await _load_events(
             resolved_store,
             days=args.current_days,
@@ -1004,19 +1006,23 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
             integration=args.integration,
             tool_name=args.tool,
         )
+        # Baseline window: exclude the current window so spikes aren't diluted
+        baseline_cutoff = datetime.now(timezone.utc) - timedelta(days=args.current_days)
         baseline_events = await _load_events(
             resolved_store,
             days=args.baseline_days,
+            until=baseline_cutoff,
             limit=args.limit,
             actor=args.actor,
             integration=args.integration,
             tool_name=args.tool,
         )
+        baseline_actual_days = max(args.baseline_days - args.current_days, 1)
         report = build_anomalies_report(
             current_events,
             baseline_events,
             current_days=args.current_days,
-            baseline_days=args.baseline_days,
+            baseline_days=baseline_actual_days,
             threshold=args.threshold,
             integration=args.integration,
         )

@@ -1,6 +1,6 @@
 import asyncio
 from argparse import Namespace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import sys
 from pathlib import Path
 
@@ -856,3 +856,284 @@ def test_inspector_parser_accepts_all_flags():
     assert args.token == "abc"
     assert args.port == 8080
     assert args.server_port == 9090
+
+
+# ===================================================================
+# HARDENING TESTS — empty inputs, edge cases, corrupt data
+# ===================================================================
+
+
+# --- every command with empty event list ---
+
+
+def test_status_report_with_empty_events():
+    report = build_status_report([], store_configured=True, window_days=7)
+    assert report["event_count"] == 0
+    assert report["failure_count"] == 0
+    assert report["p95_ms"] == 0
+    assert report["top_tool"] is None
+    output = format_status_report(report)
+    assert "events: 0" in output
+
+
+def test_failures_report_with_empty_events():
+    report = build_failures_report([], limit=10)
+    assert report["failure_count"] == 0
+    output = format_failures_report(report)
+    assert "total failures: 0" in output
+
+
+def test_latency_report_with_empty_events():
+    report = build_latency_report([])
+    assert report["event_count"] == 0
+    assert report["overall_avg_ms"] == 0
+    assert report["overall_p95_ms"] == 0
+    output = format_latency_report(report)
+    assert "events: 0" in output
+
+
+def test_usage_report_with_empty_events():
+    report = build_usage_report([])
+    assert report["event_count"] == 0
+    output = format_usage_report(report)
+    assert "events: 0" in output
+
+
+def test_reliability_report_with_empty_events():
+    report = build_reliability_report([])
+    assert report["event_count"] == 0
+    assert report["overall_success_rate"] == 0.0
+    output = format_reliability_report(report)
+    assert "events: 0" in output
+
+
+def test_session_report_with_empty_events():
+    report = build_session_report([], session_id="empty-session")
+    assert report["event_count"] == 0
+    assert report["first_event"] is None
+    assert report["last_event"] is None
+    output = format_session_report(report)
+    assert "events: 0" in output
+    assert "first event: n/a" in output
+
+
+def test_anomalies_report_with_empty_current():
+    baseline = [make_event("search_contacts")]
+    report = build_anomalies_report([], baseline, current_days=1, baseline_days=7, threshold=2.0)
+    assert report["current_window"]["total"] == 0
+    assert len(report["alerts"]) == 0
+
+
+def test_anomalies_report_with_empty_baseline():
+    current = [make_event("search_contacts", success=False, error_code="http:500")]
+    report = build_anomalies_report(current, [], current_days=1, baseline_days=7, threshold=2.0)
+    assert report["baseline_window"]["total"] == 0
+    # Should alert on new failure rate
+    failure_alerts = [a for a in report["alerts"] if a["signal"] == "failure_rate"]
+    assert len(failure_alerts) == 1
+    assert failure_alerts[0]["change"] == "new"
+
+
+def test_anomalies_report_with_both_empty():
+    report = build_anomalies_report([], [], current_days=1, baseline_days=7, threshold=2.0)
+    assert len(report["alerts"]) == 0
+
+
+def test_inspect_report_with_empty_tools():
+    report = build_inspect_report([], mode="local", show_schema=False)
+    assert report["tool_count"] == 0
+    output = format_inspect_report(report)
+    assert "tools: 0" in output
+
+
+# --- single event edge cases ---
+
+
+def test_status_report_with_single_event():
+    events = [make_event("search_contacts", duration_ms=42)]
+    report = build_status_report(events, store_configured=True, window_days=1)
+    assert report["event_count"] == 1
+    assert report["p95_ms"] == 42
+    assert report["top_tool"] == ("search_contacts", 1)
+
+
+def test_reliability_with_single_success():
+    events = [make_event("search_contacts")]
+    report = build_reliability_report(events)
+    assert report["overall_success_rate"] == 100.0
+    assert report["tool_reliability"]["search_contacts"]["success_rate"] == 100.0
+
+
+def test_reliability_with_single_failure():
+    events = [make_event("send_message", success=False, error_code="http:403")]
+    report = build_reliability_report(events)
+    assert report["overall_success_rate"] == 0.0
+    assert report["tool_reliability"]["send_message"]["success_rate"] == 0.0
+
+
+def test_latency_with_single_event():
+    events = [make_event("search_contacts", duration_ms=150)]
+    report = build_latency_report(events)
+    assert report["overall_avg_ms"] == 150
+    assert report["overall_p95_ms"] == 150
+    assert report["tool_stats"]["search_contacts"]["p95_ms"] == 150
+
+
+# --- all success / all failure ---
+
+
+def test_reliability_all_success():
+    events = [make_event(f"tool_{i}") for i in range(10)]
+    report = build_reliability_report(events)
+    assert report["overall_success_rate"] == 100.0
+    for stats in report["tool_reliability"].values():
+        assert stats["failure"] == 0
+        assert stats["top_errors"] == []
+
+
+def test_reliability_all_failure():
+    events = [make_event(f"tool_{i}", success=False, error_code="http:500") for i in range(10)]
+    report = build_reliability_report(events)
+    assert report["overall_success_rate"] == 0.0
+    for stats in report["tool_reliability"].values():
+        assert stats["success"] == 0
+
+
+# --- session deterministic ordering ---
+
+
+def test_session_actors_sorted_deterministically():
+    events = [
+        make_event("t1", actor="zack"),
+        make_event("t2", actor="alice"),
+        make_event("t3", actor="mike"),
+    ]
+    report = build_session_report(events, session_id="s1")
+    assert report["actors"] == ["alice", "mike", "zack"]
+
+
+def test_session_integrations_sorted_deterministically():
+    events = [
+        make_event("t1", integration_category="Payments"),
+        make_event("t2", integration_category="GHL"),
+        make_event("t3", integration_category="CRM"),
+    ]
+    report = build_session_report(events, session_id="s1")
+    assert report["integrations"] == ["CRM", "GHL", "Payments"]
+
+
+# --- percentile edge cases ---
+
+
+def test_percentile_empty_list():
+    from diagnostics.cli import _percentile
+    assert _percentile([], 0.95) == 0
+
+
+def test_percentile_single_value():
+    from diagnostics.cli import _percentile
+    assert _percentile([42], 0.95) == 42
+
+
+def test_percentile_two_values():
+    from diagnostics.cli import _percentile
+    assert _percentile([10, 200], 0.95) == 200
+
+
+def test_percentile_hundred_values():
+    from diagnostics.cli import _percentile
+    values = list(range(1, 101))  # 1..100
+    assert _percentile(values, 0.95) == 95
+    assert _percentile(values, 0.50) == 50
+
+
+# --- MCPEvent.from_row with corrupt/missing data ---
+
+
+def test_event_from_row_missing_all_fields():
+    from diagnostics.telemetry import MCPEvent
+    event = MCPEvent.from_row({})
+    assert event.request_id == ""
+    assert event.actor == "unknown"
+    assert event.tool_name == ""
+    assert event.duration_ms == 0
+    assert event.success is False  # bool({}) is False, _coerce_bool(None) → bool(None) → False
+    assert event.integration_category == "GHL"
+    assert event.payload_summary == {}
+
+
+def test_event_from_row_string_payload_summary():
+    from diagnostics.telemetry import MCPEvent
+    event = MCPEvent.from_row({
+        "payload_summary": '{"tool": "test"}',
+    })
+    assert event.payload_summary == {"tool": "test"}
+
+
+def test_event_from_row_corrupt_json_payload():
+    from diagnostics.telemetry import MCPEvent
+    event = MCPEvent.from_row({
+        "payload_summary": "not valid json {{{",
+    })
+    assert event.payload_summary == {"raw": "not valid json {{{"}
+
+
+def test_event_from_row_coerces_string_success():
+    from diagnostics.telemetry import MCPEvent
+    event_true = MCPEvent.from_row({"success": "true"})
+    assert event_true.success is True
+    event_false = MCPEvent.from_row({"success": "false"})
+    assert event_false.success is False
+
+
+def test_event_from_row_coerces_string_duration():
+    from diagnostics.telemetry import MCPEvent
+    event = MCPEvent.from_row({"duration_ms": "250"})
+    assert event.duration_ms == 250
+
+
+def test_event_from_row_handles_numeric_upstream_status():
+    from diagnostics.telemetry import MCPEvent
+    event = MCPEvent.from_row({"upstream_status": "403"})
+    assert event.upstream_status == 403
+    event_none = MCPEvent.from_row({"upstream_status": "invalid"})
+    assert event_none.upstream_status is None
+
+
+# --- anomalies baseline exclusion ---
+
+
+def test_anomalies_via_run_command_excludes_current_from_baseline():
+    """Verify that the baseline window uses an 'until' cutoff."""
+    store = MemoryEventStore()
+    now = datetime.now(timezone.utc)
+
+    async def seed():
+        # Old baseline event (3 days ago) — healthy
+        await store.write_event(make_event("search_contacts", timestamp=now - timedelta(days=3)))
+        # Current event (1 hour ago) — failure
+        await store.write_event(make_event("search_contacts", timestamp=now - timedelta(hours=1),
+                                           success=False, error_code="http:500"))
+
+    asyncio.run(seed())
+
+    output = asyncio.run(
+        run_command(
+            Namespace(
+                command="anomalies",
+                current_days=1,
+                baseline_days=7,
+                threshold=2.0,
+                limit=1000,
+                actor=None,
+                integration=None,
+                tool=None,
+            ),
+            store=store,
+        )
+    )
+
+    # Current should have 1 failure, baseline should have 1 success (not contaminated)
+    assert "current window: 1d (1 events" in output
+    # Baseline should NOT include the current-day failure
+    assert "baseline window: 6d (1 events" in output
