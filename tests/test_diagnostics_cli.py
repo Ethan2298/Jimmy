@@ -17,6 +17,7 @@ from diagnostics.cli import (
     build_anomalies_report,
     build_failures_report,
     build_inspect_report,
+    build_inspector_command,
     build_latency_report,
     build_parser,
     build_reliability_report,
@@ -27,6 +28,7 @@ from diagnostics.cli import (
     format_anomalies_report,
     format_failures_report,
     format_inspect_report,
+    format_inspector_launch,
     format_latency_report,
     format_reliability_report,
     format_session_report,
@@ -774,3 +776,83 @@ def test_inspect_command_local_via_run_command(monkeypatch):
     assert "Jimmy inspect" in output
     assert "mode: local" in output
     assert "search_contacts" in output
+
+
+# --- inspector command ---
+
+
+def test_inspector_command_builds_local_stdio():
+    result = build_inspector_command()
+
+    assert result["ok"] is True
+    assert "@modelcontextprotocol/inspector" in result["cmd"][1]
+    assert "mcp_servers.ghl.server" in result["cmd"][-1]
+    assert result["mode"] == "ui"
+    assert result["target"] == "local (mcp_servers.ghl.server)"
+
+
+def test_inspector_command_builds_cli_mode():
+    result = build_inspector_command(cli_mode=True)
+
+    assert result["ok"] is True
+    assert "--cli" in result["cmd"]
+    assert result["mode"] == "cli"
+
+
+def test_inspector_command_builds_remote_http():
+    result = build_inspector_command(remote_url="https://example.com/api/mcp", auth_token="secret-token")
+
+    assert result["ok"] is True
+    assert "--method" in result["cmd"]
+    assert "streamableHttp" in result["cmd"]
+    assert result["env"]["MCP_SERVER_URL"] == "https://example.com/api/mcp"
+    assert "secret-token" in result["env"]["MCP_HEADERS"]
+    assert result["target"] == "https://example.com/api/mcp"
+
+
+def test_inspector_command_custom_ports():
+    result = build_inspector_command(port=8080, server_port=9090)
+
+    assert result["ok"] is True
+    assert result["env"]["CLIENT_PORT"] == "8080"
+    assert result["env"]["SERVER_PORT"] == "9090"
+    assert result["port"] == 8080
+    assert result["server_port"] == 9090
+
+
+def test_inspector_command_fails_without_npx(monkeypatch):
+    monkeypatch.setattr("diagnostics.cli.shutil.which", lambda name: None)
+
+    result = build_inspector_command()
+
+    assert result["ok"] is False
+    assert "npx not found" in result["error"]
+
+
+def test_inspector_format_launch_shows_ui_info():
+    result = build_inspector_command()
+    output = format_inspector_launch(result)
+
+    assert "Jimmy inspector" in output
+    assert "mode: ui" in output
+    assert "localhost:6274" in output
+    assert "localhost:6277" in output
+
+
+def test_inspector_format_launch_shows_error():
+    result = {"ok": False, "error": "npx not found"}
+    output = format_inspector_launch(result)
+
+    assert "error: npx not found" in output
+
+
+def test_inspector_parser_accepts_all_flags():
+    parser = build_parser()
+    args = parser.parse_args(["inspector", "--cli", "--remote", "https://x.com/mcp", "--token", "abc", "--port", "8080", "--server-port", "9090"])
+
+    assert args.command == "inspector"
+    assert args.cli is True
+    assert args.remote == "https://x.com/mcp"
+    assert args.token == "abc"
+    assert args.port == 8080
+    assert args.server_port == 9090

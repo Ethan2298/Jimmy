@@ -4,6 +4,9 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
+import subprocess
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -706,6 +709,85 @@ def format_inspect_report(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def build_inspector_command(
+    *,
+    cli_mode: bool = False,
+    remote_url: str | None = None,
+    auth_token: str | None = None,
+    port: int | None = None,
+    server_port: int | None = None,
+) -> dict[str, Any]:
+    npx = shutil.which("npx")
+    if not npx:
+        return {"ok": False, "error": "npx not found. Install Node.js to use the MCP Inspector."}
+
+    env = dict(os.environ)
+
+    if remote_url:
+        token = auth_token or os.getenv("MCP_AUTH_TOKEN", "").strip()
+        cmd = [npx, "@modelcontextprotocol/inspector", "--method", "streamableHttp"]
+        env["MCP_SERVER_URL"] = remote_url
+        if token:
+            env["MCP_HEADERS"] = json.dumps({"Authorization": f"Bearer {token}"})
+    else:
+        server_module = os.path.join(PROJECT_ROOT, "mcp_servers", "ghl", "server.py")
+        cmd = [npx, "@modelcontextprotocol/inspector", sys.executable, "-m", "mcp_servers.ghl.server"]
+        env.setdefault("GHL_API_KEY", os.getenv("GHL_API_KEY", ""))
+        env.setdefault("GHL_LOCATION_ID", os.getenv("GHL_LOCATION_ID", ""))
+
+    if cli_mode:
+        cmd.insert(2, "--cli")
+
+    if port:
+        env["CLIENT_PORT"] = str(port)
+    if server_port:
+        env["SERVER_PORT"] = str(server_port)
+
+    mode = "cli" if cli_mode else "ui"
+    target = remote_url or "local (mcp_servers.ghl.server)"
+
+    return {
+        "ok": True,
+        "cmd": cmd,
+        "env": env,
+        "mode": mode,
+        "target": target,
+        "port": port or 6274,
+        "server_port": server_port or 6277,
+    }
+
+
+def format_inspector_launch(result: dict[str, Any]) -> str:
+    if not result["ok"]:
+        return f"Jimmy inspector\n- error: {result['error']}"
+    lines = [
+        "Jimmy inspector",
+        f"- mode: {result['mode']}",
+        f"- target: {result['target']}",
+        f"- command: {' '.join(result['cmd'])}",
+    ]
+    if result["mode"] == "ui":
+        lines.append(f"- UI: http://localhost:{result['port']}")
+        lines.append(f"- proxy: http://localhost:{result['server_port']}")
+    return "\n".join(lines)
+
+
+def run_inspector(result: dict[str, Any]) -> int:
+    if not result["ok"]:
+        print(format_inspector_launch(result), file=sys.stderr)
+        return 1
+    print(format_inspector_launch(result))
+    print("launching...\n")
+    try:
+        proc = subprocess.run(result["cmd"], env=result["env"], cwd=PROJECT_ROOT)
+        return proc.returncode
+    except KeyboardInterrupt:
+        return 0
+
+
 def _missing_env_vars(names: tuple[str, ...]) -> list[str]:
     return [name for name in names if not os.getenv(name, "").strip()]
 
@@ -848,6 +930,13 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.add_argument("--schema", action="store_true", default=False, help="Show full parameter details for each tool")
     inspect_parser.add_argument("--tool", type=str, default=None, help="Filter tools by name substring")
 
+    inspector_parser = subparsers.add_parser("inspector", help="Launch official MCP Inspector (visual debugger)")
+    inspector_parser.add_argument("--cli", action="store_true", default=False, help="Run in headless CLI mode instead of browser UI")
+    inspector_parser.add_argument("--remote", type=str, default=None, metavar="URL", help="Connect to remote HTTP MCP server URL")
+    inspector_parser.add_argument("--token", type=str, default=None, help="Auth token for remote server (or set MCP_AUTH_TOKEN)")
+    inspector_parser.add_argument("--port", type=int, default=None, help="Client UI port (default: 6274)")
+    inspector_parser.add_argument("--server-port", type=int, default=None, help="Proxy server port (default: 6277)")
+
     return parser
 
 
@@ -976,6 +1065,17 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "inspector":
+        result = build_inspector_command(
+            cli_mode=args.cli,
+            remote_url=args.remote,
+            auth_token=args.token,
+            port=args.port,
+            server_port=args.server_port,
+        )
+        return run_inspector(result)
+
     try:
         output = asyncio.run(run_command(args))
     except CLICommandError as exc:
