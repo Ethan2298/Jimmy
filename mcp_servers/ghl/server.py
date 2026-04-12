@@ -8,8 +8,18 @@ from typing import Any
 import httpx
 
 from mcp_servers.ghl.client import GHLAPIError, GHLClient
+from mcp_servers.ghl.cli import (
+    build_failures_report,
+    build_latency_report,
+    build_status_report,
+    build_usage_report,
+)
 from mcp_servers.ghl.config import GHL_LOCATION_ID
-from mcp_servers.ghl.telemetry import create_instrumented_mcp
+from mcp_servers.ghl.telemetry import (
+    MCPEventQuery,
+    create_event_store_from_env,
+    create_instrumented_mcp,
+)
 
 KB_DIR = Path(__file__).parent / "knowledge_base"
 SKILL_PREFIX = "skill-"
@@ -1850,6 +1860,128 @@ async def memory_delete(key: str) -> str:
         return _success({"deleted": key})
     except httpx.HTTPStatusError as e:
         return _validation_error(f"Failed to delete memory: {e.response.text}", field="key")
+
+
+# ── Analytics — expose telemetry data as tools ───────────────────────────────
+
+_analytics_store = create_event_store_from_env()
+
+
+async def _load_analytics_events(
+    days: int,
+    limit: int,
+    tool_name: str = "",
+    success_only: bool | None = None,
+) -> list:
+    from datetime import timedelta
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    query = MCPEventQuery(
+        since=since,
+        tool_name=tool_name or None,
+        success=success_only,
+        limit=limit,
+    )
+    return await _analytics_store.fetch_events(query)
+
+
+@mcp.tool()
+async def analytics_status(days: int = 1, limit: int = 500) -> str:
+    """Get a high-level status report: event count, failure count, p95 latency, top tool/actor.
+
+    Use this to quickly check if the system is healthy and active.
+
+    Args:
+        days: Lookback window in days (default 1).
+        limit: Max events to analyze (default 500).
+    """
+    store_configured = getattr(_analytics_store, "enabled", False)
+    if not store_configured:
+        return _validation_error("Event store is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+
+    events = await _load_analytics_events(days, limit)
+    report = build_status_report(events, store_configured=store_configured, window_days=days)
+    # Serialize datetime for JSON
+    if report.get("last_event_at"):
+        report["last_event_at"] = report["last_event_at"].isoformat()
+    return _success({"report": report})
+
+
+@mcp.tool()
+async def analytics_failures(days: int = 7, limit: int = 1000, recent_limit: int = 10) -> str:
+    """Get a failure report: error codes, scope issues, recent failures with details.
+
+    Use this to diagnose what's breaking and why.
+
+    Args:
+        days: Lookback window in days (default 7).
+        limit: Max events to scan (default 1000).
+        recent_limit: Max individual failures to return (default 10).
+    """
+    store_configured = getattr(_analytics_store, "enabled", False)
+    if not store_configured:
+        return _validation_error("Event store is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+
+    events = await _load_analytics_events(days, limit)
+    report = build_failures_report(events, limit=recent_limit)
+    # Serialize for JSON
+    report["failure_codes"] = dict(report["failure_codes"])
+    report["failure_integrations"] = dict(report["failure_integrations"])
+    report["recent_failures"] = [
+        {
+            "request_id": e.request_id,
+            "timestamp": e.timestamp.isoformat(),
+            "tool_name": e.tool_name,
+            "error_code": e.error_code,
+            "upstream_status": e.upstream_status,
+            "scope_required": e.scope_required,
+            "duration_ms": e.duration_ms,
+            "actor": e.actor,
+        }
+        for e in report["recent_failures"]
+    ]
+    return _success({"report": report})
+
+
+@mcp.tool()
+async def analytics_usage(days: int = 7, limit: int = 1000) -> str:
+    """Get a usage report: tool call counts, top tools, top actors, success rate.
+
+    Use this to understand how the system is being used.
+
+    Args:
+        days: Lookback window in days (default 7).
+        limit: Max events to scan (default 1000).
+    """
+    store_configured = getattr(_analytics_store, "enabled", False)
+    if not store_configured:
+        return _validation_error("Event store is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+
+    events = await _load_analytics_events(days, limit)
+    report = build_usage_report(events)
+    # Serialize Counters for JSON
+    report["tool_counts"] = dict(report["tool_counts"])
+    report["actor_counts"] = dict(report["actor_counts"])
+    report["integration_counts"] = dict(report["integration_counts"])
+    return _success({"report": report})
+
+
+@mcp.tool()
+async def analytics_latency(days: int = 7, limit: int = 1000) -> str:
+    """Get a latency report: per-tool avg/p95/max ms, overall latency.
+
+    Use this to find slow tools and track performance.
+
+    Args:
+        days: Lookback window in days (default 7).
+        limit: Max events to scan (default 1000).
+    """
+    store_configured = getattr(_analytics_store, "enabled", False)
+    if not store_configured:
+        return _validation_error("Event store is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+
+    events = await _load_analytics_events(days, limit)
+    report = build_latency_report(events)
+    return _success({"report": report})
 
 
 if __name__ == "__main__":

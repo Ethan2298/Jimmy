@@ -60,13 +60,12 @@ Each MCP tool is a program. Track build status, test coverage, and edge cases.
 | `memory_list` | memory | live |
 | `memory_delete` | memory | live |
 
+| `analytics_status` | telemetry | live |
+| `analytics_failures` | telemetry | live |
+| `analytics_usage` | telemetry | live |
+| `analytics_latency` | telemetry | live |
+
 #### Queued Programs
-| Program | Zone | What it does | Priority |
-|---------|------|-------------|----------|
-| `analytics_status` | telemetry | Event count, failure count, p95 latency, top tool/actor | P1 |
-| `analytics_failures` | telemetry | Recent failures, error codes, scope issues | P1 |
-| `analytics_usage` | telemetry | Tool call counts, top tools, success rate | P1 |
-| `analytics_latency` | telemetry | Per-tool avg/p95/max latency | P1 |
 | `prepare_context` | system | Bundle contact + memory + recent messages in one call | P2 |
 | `bulk_tag` | contacts | Tag multiple contacts in one call | P3 |
 | `bulk_update_stage` | pipeline | Move multiple deals in one call | P3 |
@@ -89,11 +88,10 @@ Each skill is a workflow that chains multiple programs.
 | `follow-ups` | plan | Overdue tasks + pending follow-ups |
 | `template` | — | Skeleton for building new skills |
 
+| `inbox` | plan | Unread/unanswered messages ranked by urgency |
+| `send` | execute | Context-aware message drafting + send with confirmation |
+
 #### Queued Routines
-| Routine | Mode | What it does | Priority |
-|---------|------|-------------|----------|
-| `inbox` | plan | Unread/unanswered messages ranked by urgency | P1 |
-| `send` | execute | Context-aware message drafting + send with confirmation | P1 |
 | `book` | execute | End-to-end appointment booking (free slots → book → confirm) | P2 |
 | `new-lead` | execute | Intake: create contact, tag, create opportunity, log note | P2 |
 | `weekly-review` | review | Won/lost this week, velocity, follow-up completion, patterns | P2 |
@@ -108,12 +106,12 @@ Each skill is a workflow that chains multiple programs.
 #### Cycle 1 — Telemetry & Inbox
 Goal: Make the MCP observable and handle the most common dealer question.
 
-- [ ] Wire `analytics_status` tool (logic exists in cli.py)
-- [ ] Wire `analytics_failures` tool
-- [ ] Wire `analytics_usage` tool
-- [ ] Wire `analytics_latency` tool
-- [ ] Build `inbox` skill
-- [ ] Build `send` skill
+- [x] Wire `analytics_status` tool (logic exists in cli.py)
+- [x] Wire `analytics_failures` tool
+- [x] Wire `analytics_usage` tool
+- [x] Wire `analytics_latency` tool
+- [x] Build `inbox` skill
+- [x] Build `send` skill
 - [ ] Test all against live GHL data
 
 #### Cycle 2 — Workflows & Context
@@ -171,3 +169,6 @@ What shipped, when.
 |------|-------------|
 | 2026-04-12 | Marcus → Jimmy rename (system prompt, UI, all docs) |
 | 2026-04-12 | Codebase architecture audit + The Grid created |
+| 2026-04-12 | Cycle 1: analytics tools (status, failures, usage, latency) wired as MCP tools |
+| 2026-04-12 | Cycle 1: inbox skill — surface unanswered convos ranked by urgency |
+| 2026-04-12 | Cycle 1: send skill — context-aware message drafting + send with memory |
