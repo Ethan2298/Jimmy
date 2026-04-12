@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Jimmy (RPM) is a Next.js web app where car dealers chat with Marcus, an AI sales co-worker. Marcus reads and writes GoHighLevel (GHL) CRM through server-side tool calls — contacts, conversations, pipelines, calendars. Supabase handles auth and chat history. Deployed on Vercel.
 
+## Priority
+
+**Primary: MCP server and GHL integration.** The remote MCP endpoint (`/api/mcp`), GHL tools, and everything that makes Marcus a great dealership co-worker. This is the core product — make it awesome.
+
+**Secondary: Magi.** The Electron desktop app in `magi/` is a side project. Don't prioritize it over MCP work.
+
 ## Commands
 
 ```bash
