@@ -5,11 +5,22 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Any
+from typing import Any, TypedDict
 
 import httpx
 
 _SENTINEL = object()
+
+
+class InspectReport(TypedDict):
+    mode: str
+    tool_count: int
+    read_count: int
+    write_count: int
+    categories: dict[str, list[dict[str, Any]]]
+    tools: list[dict[str, Any]]
+    show_schema: bool
+    tool_filter: str | None
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -132,7 +143,7 @@ def _categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, A
     return categorized
 
 
-def build_inspect_report(tools: list[dict[str, Any]], *, mode: str, show_schema: bool, tool_filter: str | None = None) -> dict[str, Any]:
+def build_inspect_report(tools: list[dict[str, Any]], *, mode: str, show_schema: bool, tool_filter: str | None = None) -> InspectReport:
     if tool_filter:
         tools = [t for t in tools if tool_filter.lower() in t["name"].lower()]
     categories = _categorize_tools(tools)
@@ -150,7 +161,7 @@ def build_inspect_report(tools: list[dict[str, Any]], *, mode: str, show_schema:
     }
 
 
-def format_inspect_report(report: dict[str, Any]) -> str:
+def format_inspect_report(report: InspectReport) -> str:
     lines = [
         "Jimmy inspect",
         f"- mode: {report['mode']}",
