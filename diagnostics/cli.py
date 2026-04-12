@@ -283,6 +283,247 @@ def format_usage_report(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def build_reliability_report(events: list[MCPEvent], *, integration: str | None = None) -> dict[str, Any]:
+    tool_buckets: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "success": 0, "failure": 0})
+    error_by_tool: dict[str, Counter[str]] = defaultdict(Counter)
+    for event in events:
+        bucket = tool_buckets[event.tool_name]
+        bucket["total"] += 1
+        if event.success:
+            bucket["success"] += 1
+        else:
+            bucket["failure"] += 1
+            error_by_tool[event.tool_name][event.error_code or "unknown"] += 1
+
+    tool_reliability: dict[str, dict[str, Any]] = {}
+    for tool_name, counts in tool_buckets.items():
+        rate = (counts["success"] / counts["total"] * 100) if counts["total"] else 0.0
+        tool_reliability[tool_name] = {
+            "total": counts["total"],
+            "success": counts["success"],
+            "failure": counts["failure"],
+            "success_rate": round(rate, 1),
+            "top_errors": _top_rows(error_by_tool.get(tool_name, Counter()), limit=3),
+        }
+
+    sorted_tools = dict(sorted(tool_reliability.items(), key=lambda item: (item[1]["success_rate"], -item[1]["total"])))
+
+    total = len(events)
+    total_success = sum(1 for e in events if e.success)
+    overall_rate = round(total_success / total * 100, 1) if total else 0.0
+    return {
+        "integration_filter": integration,
+        "event_count": total,
+        "overall_success_rate": overall_rate,
+        "tool_reliability": sorted_tools,
+    }
+
+
+def format_reliability_report(report: dict[str, Any]) -> str:
+    lines = [
+        "Jimmy reliability",
+        f"- events: {report['event_count']}",
+        f"- overall success rate: {report['overall_success_rate']}%",
+    ]
+    if report["integration_filter"]:
+        lines.append(f"- integration filter: {report['integration_filter']}")
+    if report["tool_reliability"]:
+        lines.append("tool                     total   ok  fail  rate%")
+        for tool_name, stats in report["tool_reliability"].items():
+            lines.append(
+                f"{tool_name:<24} {stats['total']:>5} {stats['success']:>4} {stats['failure']:>5} {stats['success_rate']:>5}"
+            )
+            for error_code, count in stats["top_errors"]:
+                lines.append(f"  {error_code}: {count}")
+    return "\n".join(lines)
+
+
+def build_session_report(events: list[MCPEvent], *, session_id: str) -> dict[str, Any]:
+    sorted_events = sorted(events, key=lambda e: e.timestamp)
+    total_duration = sum(e.duration_ms for e in sorted_events)
+    success_count = sum(1 for e in sorted_events if e.success)
+    tool_sequence = [e.tool_name for e in sorted_events]
+    actors = list({e.actor for e in sorted_events})
+    integrations = list({e.integration_category for e in sorted_events})
+    first_ts = sorted_events[0].timestamp if sorted_events else None
+    last_ts = sorted_events[-1].timestamp if sorted_events else None
+    return {
+        "session_id": session_id,
+        "event_count": len(sorted_events),
+        "success_count": success_count,
+        "failure_count": len(sorted_events) - success_count,
+        "total_tool_duration_ms": total_duration,
+        "first_event": first_ts,
+        "last_event": last_ts,
+        "actors": actors,
+        "integrations": integrations,
+        "tool_sequence": tool_sequence,
+        "events": sorted_events,
+    }
+
+
+def format_session_report(report: dict[str, Any]) -> str:
+    lines = [
+        "Jimmy session",
+        f"- session_id: {report['session_id']}",
+        f"- events: {report['event_count']}",
+        f"- success: {report['success_count']}  failures: {report['failure_count']}",
+        f"- total tool time: {report['total_tool_duration_ms']} ms",
+        f"- first event: {_format_dt(report['first_event'])}",
+        f"- last event: {_format_dt(report['last_event'])}",
+        f"- actors: {', '.join(report['actors'])}",
+        f"- integrations: {', '.join(report['integrations'])}",
+        "- timeline:",
+    ]
+    for event in report["events"]:
+        status = "ok" if event.success else f"FAIL {event.error_code or 'unknown'}"
+        lines.append(
+            f"  {_format_dt(event.timestamp)} {event.tool_name} {event.duration_ms}ms {status}"
+        )
+    return "\n".join(lines)
+
+
+def format_session_not_found(session_id: str) -> str:
+    return "\n".join([
+        "Jimmy session",
+        f"- session_id: {session_id}",
+        "- status: no events found",
+    ])
+
+
+def build_anomalies_report(
+    current_events: list[MCPEvent],
+    baseline_events: list[MCPEvent],
+    *,
+    current_days: int,
+    baseline_days: int,
+    threshold: float,
+    integration: str | None = None,
+) -> dict[str, Any]:
+    def _rates(events: list[MCPEvent], days: int) -> dict[str, Any]:
+        total = len(events)
+        failures = sum(1 for e in events if not e.success)
+        failure_rate = round(failures / total * 100, 1) if total else 0.0
+        avg_latency = int(round(mean([e.duration_ms for e in events]))) if events else 0
+        tool_counts = Counter(e.tool_name for e in events)
+        error_counts = Counter(e.error_code or "unknown" for e in events if not e.success)
+        return {
+            "days": days,
+            "total": total,
+            "per_day": round(total / days, 1) if days else 0,
+            "failure_rate": failure_rate,
+            "avg_latency_ms": avg_latency,
+            "tool_counts": tool_counts,
+            "error_counts": error_counts,
+        }
+
+    current = _rates(current_events, current_days)
+    baseline = _rates(baseline_events, baseline_days)
+
+    alerts: list[dict[str, Any]] = []
+
+    # Failure rate spike
+    if baseline["failure_rate"] > 0 and current["failure_rate"] > 0:
+        ratio = current["failure_rate"] / baseline["failure_rate"]
+        if ratio >= threshold:
+            alerts.append({
+                "signal": "failure_rate",
+                "current": f"{current['failure_rate']}%",
+                "baseline": f"{baseline['failure_rate']}%",
+                "change": f"{ratio:.1f}x",
+            })
+    elif current["failure_rate"] > 0 and baseline["failure_rate"] == 0:
+        alerts.append({
+            "signal": "failure_rate",
+            "current": f"{current['failure_rate']}%",
+            "baseline": "0%",
+            "change": "new",
+        })
+
+    # Latency spike
+    if baseline["avg_latency_ms"] > 0:
+        ratio = current["avg_latency_ms"] / baseline["avg_latency_ms"]
+        if ratio >= threshold:
+            alerts.append({
+                "signal": "avg_latency",
+                "current": f"{current['avg_latency_ms']}ms",
+                "baseline": f"{baseline['avg_latency_ms']}ms",
+                "change": f"{ratio:.1f}x",
+            })
+
+    # New error codes
+    new_errors = set(current["error_counts"]) - set(baseline["error_counts"])
+    for code in sorted(new_errors):
+        alerts.append({
+            "signal": "new_error_code",
+            "current": f"{code} ({current['error_counts'][code]})",
+            "baseline": "not seen",
+            "change": "new",
+        })
+
+    # Per-tool failure spikes
+    current_tool_failures: dict[str, float] = {}
+    baseline_tool_failures: dict[str, float] = {}
+    for event in current_events:
+        if not event.success:
+            current_tool_failures[event.tool_name] = current_tool_failures.get(event.tool_name, 0) + 1
+    for event in baseline_events:
+        if not event.success:
+            baseline_tool_failures[event.tool_name] = baseline_tool_failures.get(event.tool_name, 0) + 1
+
+    for tool_name, current_count in current_tool_failures.items():
+        baseline_count = baseline_tool_failures.get(tool_name, 0)
+        # Normalize to per-day for fair comparison
+        current_per_day = current_count / current_days if current_days else 0
+        baseline_per_day = baseline_count / baseline_days if baseline_days else 0
+        if baseline_per_day > 0:
+            ratio = current_per_day / baseline_per_day
+            if ratio >= threshold:
+                alerts.append({
+                    "signal": f"tool_failures:{tool_name}",
+                    "current": f"{current_per_day:.1f}/day",
+                    "baseline": f"{baseline_per_day:.1f}/day",
+                    "change": f"{ratio:.1f}x",
+                })
+        elif current_per_day > 0:
+            alerts.append({
+                "signal": f"tool_failures:{tool_name}",
+                "current": f"{current_per_day:.1f}/day",
+                "baseline": "0/day",
+                "change": "new",
+            })
+
+    return {
+        "integration_filter": integration,
+        "current_window": current,
+        "baseline_window": baseline,
+        "threshold": threshold,
+        "alerts": alerts,
+    }
+
+
+def format_anomalies_report(report: dict[str, Any]) -> str:
+    current = report["current_window"]
+    baseline = report["baseline_window"]
+    lines = [
+        "Jimmy anomalies",
+        f"- current window: {current['days']}d ({current['total']} events, {current['failure_rate']}% failures, {current['avg_latency_ms']}ms avg)",
+        f"- baseline window: {baseline['days']}d ({baseline['total']} events, {baseline['failure_rate']}% failures, {baseline['avg_latency_ms']}ms avg)",
+        f"- threshold: {report['threshold']}x",
+    ]
+    if report["integration_filter"]:
+        lines.append(f"- integration filter: {report['integration_filter']}")
+    if not report["alerts"]:
+        lines.append("- no anomalies detected")
+    else:
+        lines.append(f"- alerts ({len(report['alerts'])}):")
+        for alert in report["alerts"]:
+            lines.append(
+                f"  - {alert['signal']}: {alert['current']} vs {alert['baseline']} ({alert['change']})"
+            )
+    return "\n".join(lines)
+
+
 def build_trace_report(event: MCPEvent) -> dict[str, Any]:
     return {
         "request_id": event.request_id,
@@ -453,6 +694,21 @@ def build_parser() -> argparse.ArgumentParser:
     trace_parser.add_argument("request_id", type=str, help="Exact request_id to inspect")
     trace_parser.add_argument("--integration", type=str, default=None, help="Filter by integration category")
 
+    reliability_parser = subparsers.add_parser("reliability", help="Per-tool success rates and error breakdown")
+    add_common_arguments(reliability_parser, default_days=7, default_limit=1000)
+
+    session_parser = subparsers.add_parser("session", help="Replay all MCP events in a session")
+    session_parser.add_argument("session_id", type=str, help="Session ID to inspect")
+
+    anomalies_parser = subparsers.add_parser("anomalies", help="Detect spikes vs baseline window")
+    anomalies_parser.add_argument("--current-days", type=int, default=1, help="Current window in days (default: 1)")
+    anomalies_parser.add_argument("--baseline-days", type=int, default=7, help="Baseline window in days (default: 7)")
+    anomalies_parser.add_argument("--threshold", type=float, default=2.0, help="Alert when metric exceeds Nx baseline (default: 2.0)")
+    anomalies_parser.add_argument("--limit", type=int, default=2000, help="Max rows to read per window")
+    anomalies_parser.add_argument("--actor", type=str, default=None, help="Filter by actor")
+    anomalies_parser.add_argument("--integration", type=str, default=None, help="Filter by integration category")
+    anomalies_parser.add_argument("--tool", type=str, default=None, help="Filter by tool")
+
     return parser
 
 
@@ -484,6 +740,46 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
         if not events:
             raise CLICommandError(format_trace_not_found(args.request_id, integration=args.integration))
         return format_trace_report(build_trace_report(events[0]))
+
+    if args.command == "session":
+        if not store_configured:
+            raise RuntimeError("Supabase event store is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+        query = MCPEventQuery(limit=500)
+        all_events = await resolved_store.fetch_events(query)
+        session_events = [e for e in all_events if e.session_id == args.session_id]
+        if not session_events:
+            raise CLICommandError(format_session_not_found(args.session_id))
+        report = build_session_report(session_events, session_id=args.session_id)
+        return format_session_report(report)
+
+    if args.command == "anomalies":
+        if not store_configured:
+            raise RuntimeError("Supabase event store is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+        current_events = await _load_events(
+            resolved_store,
+            days=args.current_days,
+            limit=args.limit,
+            actor=args.actor,
+            integration=args.integration,
+            tool_name=args.tool,
+        )
+        baseline_events = await _load_events(
+            resolved_store,
+            days=args.baseline_days,
+            limit=args.limit,
+            actor=args.actor,
+            integration=args.integration,
+            tool_name=args.tool,
+        )
+        report = build_anomalies_report(
+            current_events,
+            baseline_events,
+            current_days=args.current_days,
+            baseline_days=args.baseline_days,
+            threshold=args.threshold,
+            integration=args.integration,
+        )
+        return format_anomalies_report(report)
 
     events = await _load_events(
         resolved_store,
@@ -517,6 +813,10 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
     if args.command == "usage":
         report = build_usage_report(events, integration=args.integration)
         return format_usage_report(report)
+
+    if args.command == "reliability":
+        report = build_reliability_report(events, integration=args.integration)
+        return format_reliability_report(report)
 
     raise ValueError(f"Unknown command: {args.command}")
 

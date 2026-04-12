@@ -14,14 +14,20 @@ from diagnostics import cli as cli_module
 from diagnostics.cli import (
     CLICommandError,
     HealthCheckResult,
+    build_anomalies_report,
     build_failures_report,
     build_latency_report,
     build_parser,
+    build_reliability_report,
+    build_session_report,
     build_status_report,
     build_trace_report,
     build_usage_report,
+    format_anomalies_report,
     format_failures_report,
     format_latency_report,
+    format_reliability_report,
+    format_session_report,
     format_status_report,
     format_trace_report,
     format_usage_report,
@@ -353,3 +359,265 @@ def test_main_returns_zero_for_status(monkeypatch, capsys):
 
     assert exit_code == 0
     assert "Jimmy status" in captured.out
+
+
+# --- reliability command ---
+
+
+def test_reliability_report_shows_per_tool_success_rates():
+    events = [
+        make_event("search_contacts", duration_ms=80),
+        make_event("search_contacts", duration_ms=90),
+        make_event("search_contacts", success=False, duration_ms=200, error_code="http:500"),
+        make_event("send_message", success=False, duration_ms=220, error_code="http:403"),
+        make_event("send_message", success=False, duration_ms=180, error_code="http:403"),
+        make_event("send_message", duration_ms=100),
+    ]
+
+    report = build_reliability_report(events, integration=None)
+
+    assert report["event_count"] == 6
+    assert report["overall_success_rate"] == 50.0
+    assert report["tool_reliability"]["search_contacts"]["success_rate"] == 66.7
+    assert report["tool_reliability"]["search_contacts"]["failure"] == 1
+    assert report["tool_reliability"]["send_message"]["success_rate"] == 33.3
+    assert report["tool_reliability"]["send_message"]["failure"] == 2
+
+
+def test_reliability_report_shows_top_errors():
+    events = [
+        make_event("send_message", success=False, error_code="http:403"),
+        make_event("send_message", success=False, error_code="http:403"),
+        make_event("send_message", success=False, error_code="http:500"),
+    ]
+
+    report = build_reliability_report(events, integration=None)
+    top_errors = report["tool_reliability"]["send_message"]["top_errors"]
+
+    assert top_errors[0] == ("http:403", 2)
+    assert top_errors[1] == ("http:500", 1)
+
+
+def test_reliability_format_includes_error_breakdown():
+    events = [
+        make_event("search_contacts", duration_ms=80),
+        make_event("search_contacts", success=False, error_code="http:500"),
+    ]
+
+    output = format_reliability_report(build_reliability_report(events, integration=None))
+
+    assert "Jimmy reliability" in output
+    assert "50.0%" in output
+    assert "http:500" in output
+
+
+def test_reliability_command_via_run_command():
+    store = MemoryEventStore()
+
+    async def seed():
+        await store.write_event(make_event("search_contacts"))
+        await store.write_event(make_event("search_contacts", success=False, error_code="http:500"))
+
+    asyncio.run(seed())
+
+    output = asyncio.run(
+        run_command(
+            Namespace(command="reliability", days=7, limit=1000, actor=None, integration=None, tool=None),
+            store=store,
+        )
+    )
+
+    assert "Jimmy reliability" in output
+    assert "search_contacts" in output
+
+
+# --- session command ---
+
+
+def test_session_report_replays_events_in_order():
+    events = [
+        make_event("get_contact", timestamp=datetime(2026, 4, 11, 12, 2, tzinfo=timezone.utc), request_id="req-2"),
+        make_event("search_contacts", timestamp=datetime(2026, 4, 11, 12, 0, tzinfo=timezone.utc), request_id="req-1"),
+        make_event("send_message", timestamp=datetime(2026, 4, 11, 12, 5, tzinfo=timezone.utc), request_id="req-3",
+                    success=False, error_code="http:403"),
+    ]
+
+    report = build_session_report(events, session_id="session-1")
+
+    assert report["session_id"] == "session-1"
+    assert report["event_count"] == 3
+    assert report["success_count"] == 2
+    assert report["failure_count"] == 1
+    assert report["tool_sequence"] == ["search_contacts", "get_contact", "send_message"]
+
+
+def test_session_format_shows_timeline():
+    events = [
+        make_event("search_contacts", timestamp=datetime(2026, 4, 11, 12, 0, tzinfo=timezone.utc), duration_ms=80),
+        make_event("send_message", timestamp=datetime(2026, 4, 11, 12, 1, tzinfo=timezone.utc),
+                    success=False, error_code="http:403", duration_ms=220),
+    ]
+
+    output = format_session_report(build_session_report(events, session_id="session-1"))
+
+    assert "Jimmy session" in output
+    assert "session_id: session-1" in output
+    assert "timeline:" in output
+    assert "search_contacts 80ms ok" in output
+    assert "send_message 220ms FAIL http:403" in output
+
+
+def test_session_command_via_run_command():
+    store = MemoryEventStore()
+
+    async def seed():
+        await store.write_event(make_event("search_contacts", request_id="req-1"))
+        await store.write_event(make_event("get_contact", request_id="req-2"))
+
+    asyncio.run(seed())
+
+    output = asyncio.run(
+        run_command(Namespace(command="session", session_id="session-1"), store=store)
+    )
+
+    assert "session_id: session-1" in output
+    assert "events: 2" in output
+
+
+def test_session_command_not_found():
+    store = MemoryEventStore()
+
+    with pytest.raises(CLICommandError) as excinfo:
+        asyncio.run(run_command(Namespace(command="session", session_id="nonexistent"), store=store))
+
+    assert "no events found" in excinfo.value.output
+
+
+# --- anomalies command ---
+
+
+def test_anomalies_detects_failure_rate_spike():
+    current = [
+        make_event("search_contacts", success=False, error_code="http:500"),
+        make_event("search_contacts", success=False, error_code="http:500"),
+        make_event("search_contacts"),
+    ]
+    baseline = [
+        make_event("search_contacts"),
+        make_event("search_contacts"),
+        make_event("search_contacts"),
+        make_event("search_contacts"),
+        make_event("search_contacts"),
+        make_event("search_contacts", success=False, error_code="http:500"),
+    ]
+
+    report = build_anomalies_report(current, baseline, current_days=1, baseline_days=7, threshold=2.0)
+
+    failure_alerts = [a for a in report["alerts"] if a["signal"] == "failure_rate"]
+    assert len(failure_alerts) == 1
+    assert "66.7%" in failure_alerts[0]["current"]
+
+
+def test_anomalies_detects_new_error_codes():
+    current = [
+        make_event("send_message", success=False, error_code="http:429"),
+    ]
+    baseline = [
+        make_event("send_message", success=False, error_code="http:403"),
+        make_event("send_message"),
+    ]
+
+    report = build_anomalies_report(current, baseline, current_days=1, baseline_days=7, threshold=2.0)
+
+    new_error_alerts = [a for a in report["alerts"] if a["signal"] == "new_error_code"]
+    assert len(new_error_alerts) == 1
+    assert "http:429" in new_error_alerts[0]["current"]
+
+
+def test_anomalies_detects_latency_spike():
+    current = [
+        make_event("search_contacts", duration_ms=500),
+        make_event("search_contacts", duration_ms=600),
+    ]
+    baseline = [
+        make_event("search_contacts", duration_ms=100),
+        make_event("search_contacts", duration_ms=120),
+    ]
+
+    report = build_anomalies_report(current, baseline, current_days=1, baseline_days=7, threshold=2.0)
+
+    latency_alerts = [a for a in report["alerts"] if a["signal"] == "avg_latency"]
+    assert len(latency_alerts) == 1
+
+
+def test_anomalies_no_alerts_when_stable():
+    events = [
+        make_event("search_contacts", duration_ms=100),
+        make_event("search_contacts", duration_ms=110),
+    ]
+
+    report = build_anomalies_report(events, events, current_days=1, baseline_days=7, threshold=2.0)
+
+    assert len(report["alerts"]) == 0
+
+
+def test_anomalies_detects_per_tool_failure_spike():
+    current = [
+        make_event("send_message", success=False, error_code="http:403"),
+        make_event("send_message", success=False, error_code="http:403"),
+        make_event("search_contacts"),
+    ]
+    baseline = [
+        make_event("send_message"),
+        make_event("send_message"),
+        make_event("send_message"),
+        make_event("send_message"),
+        make_event("send_message"),
+        make_event("send_message"),
+        make_event("send_message", success=False, error_code="http:403"),
+    ]
+
+    report = build_anomalies_report(current, baseline, current_days=1, baseline_days=7, threshold=2.0)
+
+    tool_alerts = [a for a in report["alerts"] if a["signal"] == "tool_failures:send_message"]
+    assert len(tool_alerts) == 1
+
+
+def test_anomalies_format_output():
+    current = [make_event("search_contacts", success=False, error_code="http:500")]
+    baseline = [make_event("search_contacts")]
+
+    report = build_anomalies_report(current, baseline, current_days=1, baseline_days=7, threshold=2.0)
+    output = format_anomalies_report(report)
+
+    assert "Jimmy anomalies" in output
+    assert "current window: 1d" in output
+    assert "baseline window: 7d" in output
+    assert "alerts" in output
+
+
+def test_anomalies_command_via_run_command():
+    store = MemoryEventStore()
+
+    async def seed():
+        await store.write_event(make_event("search_contacts", duration_ms=100))
+
+    asyncio.run(seed())
+
+    output = asyncio.run(
+        run_command(
+            Namespace(
+                command="anomalies",
+                current_days=1,
+                baseline_days=7,
+                threshold=2.0,
+                limit=1000,
+                actor=None,
+                integration=None,
+                tool=None,
+            ),
+            store=store,
+        )
+    )
+
+    assert "Jimmy anomalies" in output
