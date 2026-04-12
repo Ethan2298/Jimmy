@@ -1,0 +1,93 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What This Is
+
+Jimmy (RPM) is a Next.js web app where car dealers chat with Marcus, an AI sales co-worker. Marcus reads and writes GoHighLevel (GHL) CRM through server-side tool calls — contacts, conversations, pipelines, calendars. Supabase handles auth and chat history. Deployed on Vercel.
+
+## Commands
+
+```bash
+npm run dev          # Start Next.js dev server (port 3000)
+npm run build        # Production build
+npm run lint         # ESLint (flat config, next/core-web-vitals + typescript)
+npm run start        # Serve production build
+```
+
+Python tests (legacy MCP server in `mcp_servers/ghl/`):
+```bash
+pip install -r requirements.txt
+python -m pytest tests/ -v              # Run all tests
+python -m pytest tests/test_ghl_mcp_server.py -v   # Single test file
+python -m pytest tests/test_ghl_mcp_server.py::test_name -v  # Single test
+```
+
+## Architecture
+
+```
+Dealer (browser) <-> Next.js App Router <-> Claude API (Marcus) <-> GHL API
+                          |
+                      Supabase
+                   (auth, chat history)
+```
+
+### Two chat interfaces
+
+1. **`/chat`** — Marcus, the dealer-facing AI co-worker. Uses `claude-sonnet-4.5` with GHL tools. Auth via Supabase. Messages persisted to `chat_sessions`/`messages` tables.
+2. **`/magi`** — Internal "Codex-style" engineering workspace. Supports Anthropic and OpenAI providers with user-supplied API keys. No Supabase persistence.
+
+### Key source paths
+
+- **`src/app/api/chat/route.ts`** — Marcus chat endpoint. Streams via Vercel AI SDK `streamText()`. Saves messages to Supabase on finish.
+- **`src/lib/ai/marcus.ts`** — Marcus system prompt (persona, sales methodology, voice rules).
+- **`src/lib/ai/tools.ts`** — AI SDK tool definitions wrapping GHL API (searchContacts, getConversationMessages, sendMessage, etc.).
+- **`src/lib/ghl/client.ts`** — GHL REST client. Handles locationId injection (some endpoints use snake_case `location_id`), auth headers, API version.
+- **`src/lib/ghl/tools.ts`** — MCP server tool registrations (used by `/api/mcp` route).
+- **`src/app/api/mcp/route.ts`** — Remote MCP endpoint (Streamable HTTP). Bearer token auth. Stateless — fresh transport per request.
+- **`src/lib/supabase/`** — Server and client Supabase helpers. Middleware refreshes auth session on every request.
+- **`src/app/(auth)/`** — Login page and OAuth callback.
+- **`src/app/oauth/`, `src/app/api/oauth/`** — RFC 7591 dynamic client registration for external MCP connectors (e.g., Claude.ai).
+
+### GHL API quirks (in `src/lib/ghl/client.ts`)
+
+- `/opportunities/search` requires `location_id` (snake_case); all other endpoints use `locationId`.
+- Sub-resource endpoints (`/notes`, `/tasks`, `/messages`, `/free-slots`) reject `locationId` in query params (422).
+- API version header: `Version: 2021-07-28`.
+
+### Supabase tables
+
+- `chat_sessions` — chat threads per user
+- `messages` — individual messages (role, content, tool_invocations)
+- `mcp_events` — MCP telemetry events
+- `knowledge_base` — stored knowledge entries
+
+Migrations in `supabase/migrations/`.
+
+### Python MCP server (`mcp_servers/ghl/`)
+
+Legacy Python implementation with CLI (`cli.py`), server (`server.py`), and telemetry. Tests in `tests/`. Uses `mcp`, `httpx`, `starlette`.
+
+### Magi (`magi/`)
+
+Separate Electron desktop app (electron-vite, React 19, Tailwind v4). Has its own `package.json`, `CLAUDE.md`, and build system. Excluded from the root TypeScript config.
+
+## Conventions
+
+- `@/*` path alias maps to `./src/*`
+- shadcn/ui components (base-nova style) in `src/components/ui/`
+- `cn()` utility from `@/lib/utils` for conditional classnames
+- Tailwind CSS v4, CSS variables for theming
+- Zod v4 for schema validation
+- npm as package manager
+- GHL is the single source of truth for dealership data — no shadow databases
+
+## Environment Variables
+
+See `.env.example`. Required:
+- `ANTHROPIC_API_KEY` — for Marcus (Claude API)
+- `GHL_API_KEY`, `GHL_LOCATION_ID` — GHL Private Integration Token and location
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` — Supabase client
+- `SUPABASE_SERVICE_ROLE_KEY` — Supabase server-side
+- `MCP_AUTH_TOKEN` — bearer token for `/api/mcp` endpoint
+- `JIMMY_PIN` — PIN for OAuth authorization flow
