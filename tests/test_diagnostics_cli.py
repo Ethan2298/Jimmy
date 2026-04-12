@@ -1,4 +1,6 @@
 import asyncio
+import json
+import uuid
 from argparse import Namespace
 from datetime import datetime, timedelta, timezone
 import sys
@@ -64,7 +66,7 @@ def make_event(
     payload_summary: dict | None = None,
 ) -> MCPEvent:
     return MCPEvent(
-        request_id=request_id or f"req-{tool_name}-{duration_ms}-{success}",
+        request_id=request_id or f"req-{uuid.uuid4().hex[:8]}",
         timestamp=timestamp or datetime(2026, 4, 11, 12, 0, tzinfo=timezone.utc),
         actor=actor,
         session_id="session-1",
@@ -1140,3 +1142,55 @@ def test_anomalies_via_run_command_excludes_current_from_baseline():
     assert "current window: 1d (1 events" in output
     # Baseline should NOT include the current-day failure
     assert "baseline window: 6d (1 events" in output
+
+
+# ===================================================================
+# END-TO-END CLI TESTS
+# ===================================================================
+
+
+def test_end_to_end_cli_status(monkeypatch, capsys):
+    """End-to-end: main() -> parse args -> run_command -> format output."""
+    store = MemoryEventStore()
+    asyncio.run(store.write_event(make_event("search_contacts")))
+
+    monkeypatch.setattr(cli_module, "create_event_store_from_env", lambda: store)
+
+    exit_code = main(["status", "--days", "7"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Jimmy status" in captured.out
+    assert "events: 1" in captured.out
+
+
+def test_end_to_end_cli_json_output(monkeypatch, capsys):
+    """End-to-end: main() with --json outputs valid JSON."""
+    store = MemoryEventStore()
+    asyncio.run(store.write_event(make_event("search_contacts", duration_ms=80)))
+    asyncio.run(store.write_event(make_event("send_message", success=False, error_code="http:403")))
+
+    monkeypatch.setattr(cli_module, "create_event_store_from_env", lambda: store)
+
+    exit_code = main(["--json", "status", "--days", "7"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    data = json.loads(captured.out)
+    assert data["event_count"] == 2
+    assert data["failure_count"] == 1
+    assert data["store_configured"] is True
+
+
+def test_end_to_end_cli_failures(monkeypatch, capsys):
+    """End-to-end: main() -> failures command."""
+    store = MemoryEventStore()
+    asyncio.run(store.write_event(make_event("send_message", success=False, error_code="http:403")))
+
+    monkeypatch.setattr(cli_module, "create_event_store_from_env", lambda: store)
+
+    exit_code = main(["failures", "--days", "7"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "total failures: 1" in captured.out
