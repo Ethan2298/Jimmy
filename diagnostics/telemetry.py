@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Awaitable
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_EVENTS_TABLE = "mcp_events"
 DEFAULT_INTEGRATION_CATEGORY = "GHL"
-SENSITIVE_KEYWORDS = (
+SENSITIVE_KEYWORDS = frozenset({
     "body",
     "content",
     "message",
@@ -31,7 +32,14 @@ SENSITIVE_KEYWORDS = (
     "secret",
     "password",
     "attachment",
-)
+    "ssn",
+    "dob",
+    "credit_card",
+    "cvv",
+    "pin",
+})
+
+_WORD_SPLIT_RE = re.compile(r"[^a-z]+")
 
 
 def _utc_now() -> datetime:
@@ -71,8 +79,8 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def _is_sensitive_key(key: str) -> bool:
-    lowered = key.lower()
-    return any(keyword in lowered for keyword in SENSITIVE_KEYWORDS)
+    segments = set(_WORD_SPLIT_RE.split(key.lower()))
+    return bool(segments & SENSITIVE_KEYWORDS)
 
 
 def summarize_value(value: Any, *, key: str | None = None) -> Any:

@@ -32,19 +32,16 @@ _READ_EXACT = frozenset(("kb_list", "kb_read", "kb_search", "memory_read", "memo
 
 async def _load_local_tools() -> list[dict[str, Any]]:
     import importlib
-    ghl_api_key = os.environ.get("GHL_API_KEY")
-    ghl_location_id = os.environ.get("GHL_LOCATION_ID")
-    os.environ.setdefault("GHL_API_KEY", "__inspect__")
-    os.environ.setdefault("GHL_LOCATION_ID", "__inspect__")
-    try:
+    from unittest.mock import patch
+    env_overrides = {}
+    if not os.environ.get("GHL_API_KEY"):
+        env_overrides["GHL_API_KEY"] = "__inspect__"
+    if not os.environ.get("GHL_LOCATION_ID"):
+        env_overrides["GHL_LOCATION_ID"] = "__inspect__"
+    with patch.dict(os.environ, env_overrides):
         module = importlib.import_module("mcp_servers.ghl.server")
         mcp_app = getattr(module, "mcp")
         tools = await mcp_app.list_tools()
-    finally:
-        if ghl_api_key is None:
-            os.environ.pop("GHL_API_KEY", None)
-        if ghl_location_id is None:
-            os.environ.pop("GHL_LOCATION_ID", None)
     return [_tool_to_dict(tool) for tool in tools]
 
 
@@ -96,17 +93,6 @@ def _is_read_tool(name: str) -> bool:
 
 def _categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Categorize tools by naming convention: prefix before first underscore."""
-    # Well-known prefix groups for clean display names
-    _DISPLAY_NAMES: dict[str, str] = {
-        "search": "contacts",
-        "get": "contacts",
-        "create": "contacts",
-        "update": "contacts",
-        "delete": "contacts",
-        "add": "contacts",
-        "remove": "contacts",
-    }
-    # Override: explicit category rules by tool name prefix
     _CATEGORY_RULES: list[tuple[tuple[str, ...], str]] = [
         (("search_contacts", "get_contact", "create_or_update_contact", "update_contact", "delete_contact", "add_contact_tags", "remove_contact_tags"), "contacts"),
         (("search_conversations", "get_conversation_messages", "send_message", "update_conversation"), "conversations"),
@@ -210,6 +196,8 @@ def build_inspector_command(
         cmd = [npx, "@modelcontextprotocol/inspector", "--method", "streamableHttp"]
         env["MCP_SERVER_URL"] = remote_url
         if token:
+            # Security note: MCP Inspector reads headers from env vars only.
+            # This is visible in /proc/<pid>/environ on Linux.
             env["MCP_HEADERS"] = json.dumps({"Authorization": f"Bearer {token}"})
     else:
         cmd = [npx, "@modelcontextprotocol/inspector", sys.executable, "-m", "mcp_servers.ghl.server"]
