@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -1860,6 +1861,140 @@ async def memory_delete(key: str) -> str:
         return _success({"deleted": key})
     except httpx.HTTPStatusError as e:
         return _validation_error(f"Failed to delete memory: {e.response.text}", field="key")
+
+
+# ── Composite tools — reduce tool-call overhead ──────────────────────────────
+
+
+@mcp.tool()
+async def prepare_context(contact_id: str) -> str:
+    """Load everything Jimmy needs about a contact in one call.
+
+    Bundles: contact details, recent conversations + last messages,
+    open opportunities, notes, tasks, and memories. Call this once
+    at the start of any interaction about a specific contact instead
+    of making 5-6 separate tool calls.
+
+    Args:
+        contact_id: The GHL contact ID.
+    """
+    cl = get_client()
+
+    async def _contact() -> dict[str, Any]:
+        try:
+            data = await cl.get(f"/contacts/{contact_id}")
+            c = data.get("contact", data)
+            return {
+                "id": c.get("id"),
+                "name": c.get("contactName"),
+                "firstName": c.get("firstName"),
+                "lastName": c.get("lastName"),
+                "phone": c.get("phone"),
+                "email": c.get("email"),
+                "tags": c.get("tags", []),
+                "source": c.get("source"),
+                "city": c.get("city"),
+                "state": c.get("state"),
+                "dateAdded": c.get("dateAdded"),
+                "customFields": c.get("customFields", []),
+                "dnd": c.get("dnd"),
+                "assignedTo": c.get("assignedTo"),
+            }
+        except GHLAPIError:
+            return {}
+
+    async def _conversations() -> list[dict[str, Any]]:
+        try:
+            data = await cl.get("/conversations/search", {"contactId": contact_id, "limit": "5"})
+            convos = []
+            for c in data.get("conversations", []):
+                convos.append({
+                    "id": c.get("id"),
+                    "lastMessageBody": (c.get("lastMessageBody") or "")[:200],
+                    "lastMessageDirection": c.get("lastMessageDirection"),
+                    "lastMessageDate": c.get("lastMessageDate"),
+                    "unreadCount": c.get("unreadCount", 0),
+                })
+            return convos
+        except GHLAPIError:
+            return []
+
+    async def _opportunities() -> list[dict[str, Any]]:
+        try:
+            data = await cl.get("/opportunities/search", {"contact_id": contact_id, "limit": "10"})
+            return [_serialize_opportunity_summary(o) for o in data.get("opportunities", [])]
+        except GHLAPIError:
+            return []
+
+    async def _notes() -> list[dict[str, Any]]:
+        try:
+            data = await cl.get(f"/contacts/{contact_id}/notes")
+            notes = []
+            for n in data.get("notes", [])[:10]:
+                notes.append({
+                    "id": n.get("id"),
+                    "body": (n.get("body") or "")[:300],
+                    "dateAdded": n.get("dateAdded"),
+                })
+            return notes
+        except GHLAPIError:
+            return []
+
+    async def _tasks() -> list[dict[str, Any]]:
+        try:
+            data = await cl.get(f"/contacts/{contact_id}/tasks")
+            tasks = []
+            for t in data.get("tasks", []):
+                tasks.append({
+                    "id": t.get("id"),
+                    "title": t.get("title"),
+                    "body": (t.get("body") or "")[:200],
+                    "dueDate": t.get("dueDate"),
+                    "completed": t.get("completed", False),
+                })
+            return tasks
+        except GHLAPIError:
+            return []
+
+    async def _memories() -> list[dict[str, Any]]:
+        if not _mem_configured():
+            return []
+        try:
+            params: list[tuple[str, str]] = [
+                ("select", "key,content,category,updated_at"),
+                ("location_id", f"eq.{_kb_location_id()}"),
+                ("related_contact_id", f"eq.{contact_id}"),
+                ("order", "updated_at.desc"),
+                ("limit", "10"),
+            ]
+            async with httpx.AsyncClient(base_url=_mem_base_url(), headers=_mem_headers(), timeout=15.0) as c:
+                r = await c.get(f"/rest/v1/{_MEMORY_TABLE}", params=params)
+                r.raise_for_status()
+                return r.json()
+        except Exception:
+            return []
+
+    contact, conversations, opportunities, notes, tasks, memories = await asyncio.gather(
+        _contact(), _conversations(), _opportunities(), _notes(), _tasks(), _memories()
+    )
+
+    if not contact:
+        return _validation_error(f"Contact '{contact_id}' not found or inaccessible.", field="contact_id")
+
+    return _success({
+        "contact": contact,
+        "conversations": conversations,
+        "opportunities": opportunities,
+        "notes": notes,
+        "tasks": tasks,
+        "memories": memories,
+        "summary": {
+            "has_open_deals": any(o.get("status") == "open" for o in opportunities),
+            "unread_messages": sum(c.get("unreadCount", 0) for c in conversations),
+            "open_tasks": sum(1 for t in tasks if not t.get("completed")),
+            "memory_count": len(memories),
+        },
+    })
 
 
 # ── Analytics — expose telemetry data as tools ───────────────────────────────

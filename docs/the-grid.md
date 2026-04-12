@@ -65,8 +65,9 @@ Each MCP tool is a program. Track build status, test coverage, and edge cases.
 | `analytics_usage` | telemetry | live |
 | `analytics_latency` | telemetry | live |
 
+| `prepare_context` | system | live |
+
 #### Queued Programs
-| `prepare_context` | system | Bundle contact + memory + recent messages in one call | P2 |
 | `bulk_tag` | contacts | Tag multiple contacts in one call | P3 |
 | `bulk_update_stage` | pipeline | Move multiple deals in one call | P3 |
 | `scope_check` | admin | Test each endpoint category, report what works/doesn't | P3 |
@@ -91,12 +92,13 @@ Each skill is a workflow that chains multiple programs.
 | `inbox` | plan | Unread/unanswered messages ranked by urgency |
 | `send` | execute | Context-aware message drafting + send with confirmation |
 
+| `book` | execute | End-to-end appointment booking (free slots → book → confirm) |
+| `new-lead` | execute | Intake: create contact, tag, create opportunity, log note |
+| `send-template` | execute | Load a message template, fill variables, send |
+
 #### Queued Routines
-| `book` | execute | End-to-end appointment booking (free slots → book → confirm) | P2 |
-| `new-lead` | execute | Intake: create contact, tag, create opportunity, log note | P2 |
 | `weekly-review` | review | Won/lost this week, velocity, follow-up completion, patterns | P2 |
 | `inventory-search` | plan | Search GHL products/custom objects for vehicles | P3 |
-| `send-template` | execute | Load a message template, fill variables, send | P3 |
 | `health-check` | review | Proactive error/scope failure check at session start | P3 |
 
 ---
@@ -117,11 +119,11 @@ Goal: Make the MCP observable and handle the most common dealer question.
 #### Cycle 2 — Workflows & Context
 Goal: Reduce tool-call overhead, streamline common actions.
 
-- [ ] Build `prepare_context` tool
-- [ ] Build `book` skill
-- [ ] Build `new-lead` skill
-- [ ] Add message templates to KB
-- [ ] Build `send-template` skill
+- [x] Build `prepare_context` tool
+- [x] Build `book` skill
+- [x] Build `new-lead` skill
+- [x] Add message templates to KB (follow-up, appointment-confirm, intro, post-visit)
+- [x] Build `send-template` skill
 
 #### Cycle 3 — Intelligence & Hardening
 Goal: Close the feedback loop, add bulk ops, harden edge cases.
@@ -172,3 +174,7 @@ What shipped, when.
 | 2026-04-12 | Cycle 1: analytics tools (status, failures, usage, latency) wired as MCP tools |
 | 2026-04-12 | Cycle 1: inbox skill — surface unanswered convos ranked by urgency |
 | 2026-04-12 | Cycle 1: send skill — context-aware message drafting + send with memory |
+| 2026-04-12 | Cycle 2: prepare_context tool — bundles contact/convos/deals/notes/tasks/memory in one call |
+| 2026-04-12 | Cycle 2: book skill — end-to-end appointment booking with confirmation |
+| 2026-04-12 | Cycle 2: new-lead skill — intake flow: create contact, tag, create deal, log note |
+| 2026-04-12 | Cycle 2: send-template skill + 4 starter templates (follow-up, appointment-confirm, intro, post-visit) |
