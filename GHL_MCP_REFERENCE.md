@@ -71,7 +71,7 @@ These are the scopes currently enabled on our PIT (`pit-87dc...`):
 - `workflows.readonly`
 - `emails/builder.readonly`
 
-### NOT Enabled — Needed for Marcus
+### NOT Enabled — Needed for Jimmy
 - `contacts.write` — create/update contacts, add tags, notes, tasks
 - `conversations/message.write` — **send SMS/email as dealership**
 - `opportunities.write` — move deals through pipeline stages
@@ -325,9 +325,9 @@ MCowBQYDK2VwAyEAi2HR1srL4o18O8BRa7gVJY7G7bupbN3H9AwJrHCDiOg=
 
 **Reasons:**
 1. GHL's official MCP has 36 generic tools — we need ~10-15 RPM-specific tools with business logic baked in
-2. Marcus needs live inventory queries mid-conversation — GHL AI can't do this
-3. Marcus needs Andrej's sales methodology as a multi-layered persona — GHL AI uses a single prompt field
-4. Marcus needs CRM context awareness during conversations — GHL AI can't read its own CRM mid-chat
+2. Jimmy needs live inventory queries mid-conversation — GHL AI can't do this
+3. Jimmy needs Andrej's sales methodology as a multi-layered persona — GHL AI uses a single prompt field
+4. Jimmy needs CRM context awareness during conversations — GHL AI can't read its own CRM mid-chat
 5. Custom MCP = less token overhead, faster responses, tighter control
 6. GHL stays as the operational backbone (CRM, pipelines, phone numbers, workflows)
 

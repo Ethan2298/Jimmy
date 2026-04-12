@@ -39,7 +39,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Message Marcus..."
+          placeholder="Message Jimmy..."
           className="min-h-[44px] max-h-[200px] resize-none"
           rows={1}
           disabled={disabled}

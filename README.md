@@ -4,7 +4,7 @@ An AI-powered SMS sales assistant for a collector car dealership. Jimmy uses Cla
 
 ## Features
 
-- **Natural SMS conversations** — AI persona ("Marcus") texts like a real car guy, not a chatbot
+- **Natural SMS conversations** — AI persona ("Jimmy") texts like a real car guy, not a chatbot
 - **Inventory search** — Claude searches 25+ collector cars by make, model, year, price, and condition
 - **Lead qualification** — Automatically captures and scores leads as the conversation progresses
 - **Appointment booking** — Schedules calls, visits, and video walkarounds
@@ -70,7 +70,7 @@ Jimmy/
 │   ├── ai/
 │   │   ├── engine.py          # Claude tool-use loop
 │   │   ├── humanizer.py       # Post-processing (split, delay, emoji)
-│   │   ├── system_prompt.py   # Marcus persona & instructions
+│   │   ├── system_prompt.py   # Jimmy persona & instructions
 │   │   └── tools.py           # Tool definitions & dispatch
 │   ├── routes/
 │   │   ├── cars.py            # Inventory CRUD endpoints

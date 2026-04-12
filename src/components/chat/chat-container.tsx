@@ -23,7 +23,7 @@ export function ChatContainer({ messages, status }: ChatContainerProps) {
         {messages.length === 0 && (
           <div className="flex h-[60vh] items-center justify-center">
             <div className="text-center">
-              <h2 className="text-lg font-medium">Marcus</h2>
+              <h2 className="text-lg font-medium">Jimmy</h2>
               <p className="text-sm text-muted-foreground mt-1">
                 Your AI sales co-worker. Ask about leads, conversations, or pipeline.
               </p>
@@ -36,7 +36,7 @@ export function ChatContainer({ messages, status }: ChatContainerProps) {
         {status === "submitted" && (
           <div className="flex justify-start">
             <div className="bg-muted rounded-2xl px-4 py-3 text-sm text-muted-foreground animate-pulse">
-              Marcus is thinking...
+              Jimmy is thinking...
             </div>
           </div>
         )}
