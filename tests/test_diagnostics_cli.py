@@ -149,7 +149,7 @@ def test_latency_report_computes_tool_stats():
 
     assert report["event_count"] == 3
     assert report["tool_stats"]["search_contacts"]["count"] == 2
-    assert report["tool_stats"]["search_contacts"]["p95_ms"] == 120
+    assert report["tool_stats"]["search_contacts"]["p95_ms"] == 118
     assert report["integration_stats"]["GHL"]["count"] == 2
     assert "Jimmy latency" in format_latency_report(report)
     assert "integration" in format_latency_report(report)
@@ -1041,7 +1041,7 @@ def test_percentile_single_value():
 
 
 def test_percentile_two_values():
-    assert _percentile([10, 200], 0.95) == 200
+    assert _percentile([10, 200], 0.95) == 190
 
 
 def test_percentile_hundred_values():

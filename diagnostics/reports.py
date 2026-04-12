@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from statistics import mean
@@ -18,11 +19,14 @@ def _percentile(values: list[int], pct: float) -> int:
     if not values:
         return 0
     ordered = sorted(values)
-    if len(ordered) == 1:
+    n = len(ordered)
+    if n == 1:
         return ordered[0]
-    rank = int((len(ordered) * pct) + 0.999999)
-    index = min(max(rank - 1, 0), len(ordered) - 1)
-    return ordered[index]
+    pos = pct * (n - 1)
+    low = int(pos)
+    high = min(low + 1, n - 1)
+    fraction = pos - low
+    return int(round(ordered[low] + fraction * (ordered[high] - ordered[low])))
 
 
 def _top_rows(counter: Counter[str], limit: int = 5) -> list[tuple[str, int]]:
@@ -517,8 +521,6 @@ def build_trace_report(event: MCPEvent) -> dict[str, Any]:
 
 
 def format_trace_report(report: dict[str, Any]) -> str:
-    import json
-
     payload_json = json.dumps(report["payload_summary"], indent=2, sort_keys=True)
     lines = [
         "Jimmy trace",
