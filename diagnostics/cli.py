@@ -410,7 +410,7 @@ def build_anomalies_report(
         return {
             "days": days,
             "total": total,
-            "per_day": round(total / days, 1) if days else 0,
+            "per_day": round(total / max(days, 1), 1),
             "failure_rate": failure_rate,
             "avg_latency_ms": avg_latency,
             "tool_counts": tool_counts,
@@ -474,8 +474,8 @@ def build_anomalies_report(
     for tool_name, current_count in current_tool_failures.items():
         baseline_count = baseline_tool_failures.get(tool_name, 0)
         # Normalize to per-day for fair comparison
-        current_per_day = current_count / current_days if current_days else 0
-        baseline_per_day = baseline_count / baseline_days if baseline_days else 0
+        current_per_day = current_count / max(current_days, 1)
+        baseline_per_day = baseline_count / max(baseline_days, 1)
         if baseline_per_day > 0:
             ratio = current_per_day / baseline_per_day
             if ratio >= threshold:
@@ -595,12 +595,15 @@ async def _load_remote_tools(url: str, auth_token: str) -> list[dict[str, Any]]:
     from mcp.client.streamable_http import streamable_http_client
     from mcp.client.session import ClientSession
 
-    headers = {"Authorization": f"Bearer {auth_token}"}
-    async with streamable_http_client(url, headers=headers) as (read_stream, write_stream, _):
+    http_client = httpx.AsyncClient(headers={"Authorization": f"Bearer {auth_token}"})
+    async with streamable_http_client(url, http_client=http_client) as (read_stream, write_stream, _):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             result = await session.list_tools()
             return [_tool_to_dict(tool) for tool in result.tools]
+
+
+_SENTINEL = object()
 
 
 def _tool_to_dict(tool: Any) -> dict[str, Any]:
@@ -631,9 +634,6 @@ def _tool_to_dict(tool: Any) -> dict[str, Any]:
         "param_count": len(params),
         "params": params,
     }
-
-
-_SENTINEL = object()
 
 
 def _categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
