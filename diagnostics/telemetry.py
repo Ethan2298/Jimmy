@@ -406,8 +406,15 @@ class InstrumentedFastMCP:
         self._app = app
         self.event_store: MCPEventStore = event_store or create_event_store_from_env()
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._app, name)
+    @property
+    def name(self) -> str:
+        return self._app.name
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        return self._app.run(*args, **kwargs)
+
+    async def list_tools(self) -> Any:
+        return await self._app.list_tools()
 
     def tool(self, *decorator_args: Any, **decorator_kwargs: Any):
         register = self._app.tool(*decorator_args, **decorator_kwargs)
