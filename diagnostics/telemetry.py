@@ -188,6 +188,7 @@ class MCPEvent:
 @dataclass(slots=True)
 class MCPEventQuery:
     request_id: str | None = None
+    session_id: str | None = None
     since: datetime | None = None
     until: datetime | None = None
     actor: str | None = None
@@ -235,6 +236,8 @@ class MemoryEventStore:
         events = list(self.events)
         if query.request_id:
             events = [event for event in events if event.request_id == query.request_id]
+        if query.session_id:
+            events = [event for event in events if event.session_id == query.session_id]
         if query.since is not None:
             events = [event for event in events if event.timestamp >= query.since]
         if query.until is not None:
@@ -281,6 +284,8 @@ class SupabaseEventStore:
 
         if query.request_id:
             params.append(("request_id", f"eq.{query.request_id}"))
+        if query.session_id:
+            params.append(("session_id", f"eq.{query.session_id}"))
         if query.since is not None:
             params.append(("occurred_at", f"gte.{_to_iso_z(query.since)}"))
         if query.until is not None:

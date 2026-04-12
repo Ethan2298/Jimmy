@@ -11,15 +11,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from diagnostics import cli as cli_module
+from diagnostics import health as health_module
 from diagnostics.cli import (
     CLICommandError,
-    HealthCheckResult,
+    build_parser,
+    main,
+    run_command,
+)
+from diagnostics.reports import (
     build_anomalies_report,
     build_failures_report,
-    build_inspect_report,
-    build_inspector_command,
     build_latency_report,
-    build_parser,
     build_reliability_report,
     build_session_report,
     build_status_report,
@@ -27,16 +29,20 @@ from diagnostics.cli import (
     build_usage_report,
     format_anomalies_report,
     format_failures_report,
-    format_inspect_report,
-    format_inspector_launch,
     format_latency_report,
     format_reliability_report,
     format_session_report,
     format_status_report,
     format_trace_report,
     format_usage_report,
-    main,
-    run_command,
+    _percentile,
+)
+from diagnostics.health import HealthCheckResult
+from diagnostics.inspect import (
+    build_inspect_report,
+    build_inspector_command,
+    format_inspect_report,
+    format_inspector_launch,
     _tool_to_dict,
     _categorize_tools,
 )
@@ -296,10 +302,10 @@ def test_health_command_reports_all_healthy(monkeypatch):
     async def healthy(name: str, detail: str) -> HealthCheckResult:
         return HealthCheckResult(name, True, detail)
 
-    monkeypatch.setattr(cli_module, "_check_required_env", lambda: healthy("config env", "all required env vars are present"))
-    monkeypatch.setattr(cli_module, "_check_supabase_connectivity", lambda store: healthy("supabase connectivity", "reachable"))
-    monkeypatch.setattr(cli_module, "_check_supabase_schema", lambda store: healthy("schema validation", "required columns are available"))
-    monkeypatch.setattr(cli_module, "_check_ghl_probe", lambda: healthy("ghl live probe", "authenticated location read succeeded"))
+    monkeypatch.setattr(cli_module, "check_required_env", lambda: healthy("config env", "all required env vars are present"))
+    monkeypatch.setattr(cli_module, "check_supabase_connectivity", lambda store: healthy("supabase connectivity", "reachable"))
+    monkeypatch.setattr(cli_module, "check_supabase_schema", lambda store: healthy("schema validation", "required columns are available"))
+    monkeypatch.setattr(cli_module, "check_ghl_probe", lambda: healthy("ghl live probe", "authenticated location read succeeded"))
 
     output = asyncio.run(run_command(Namespace(command="health", integration=None), store=MemoryEventStore()))
 
@@ -328,10 +334,10 @@ def test_health_command_reports_unhealthy_cases(monkeypatch, check_name: str, de
             return HealthCheckResult(name, False, detail)
         return await healthy(name)
 
-    monkeypatch.setattr(cli_module, "_check_required_env", lambda: maybe_fail("config env"))
-    monkeypatch.setattr(cli_module, "_check_supabase_connectivity", lambda store: maybe_fail("supabase connectivity"))
-    monkeypatch.setattr(cli_module, "_check_supabase_schema", lambda store: maybe_fail("schema validation"))
-    monkeypatch.setattr(cli_module, "_check_ghl_probe", lambda: maybe_fail("ghl live probe"))
+    monkeypatch.setattr(cli_module, "check_required_env", lambda: maybe_fail("config env"))
+    monkeypatch.setattr(cli_module, "check_supabase_connectivity", lambda store: maybe_fail("supabase connectivity"))
+    monkeypatch.setattr(cli_module, "check_supabase_schema", lambda store: maybe_fail("schema validation"))
+    monkeypatch.setattr(cli_module, "check_ghl_probe", lambda: maybe_fail("ghl live probe"))
 
     with pytest.raises(CLICommandError) as excinfo:
         asyncio.run(run_command(Namespace(command="health", integration=None), store=MemoryEventStore()))
@@ -769,6 +775,7 @@ def test_inspect_command_local_via_run_command(monkeypatch):
 
     monkeypatch.setattr(cli_module, "_load_local_tools", fake_load_local)
 
+
     output = asyncio.run(
         run_command(Namespace(command="inspect", remote=None, token=None, schema=False, tool=None))
     )
@@ -821,7 +828,7 @@ def test_inspector_command_custom_ports():
 
 
 def test_inspector_command_fails_without_npx(monkeypatch):
-    monkeypatch.setattr("diagnostics.cli.shutil.which", lambda name: None)
+    monkeypatch.setattr("diagnostics.inspect.shutil.which", lambda name: None)
 
     result = build_inspector_command()
 
@@ -1026,22 +1033,18 @@ def test_session_integrations_sorted_deterministically():
 
 
 def test_percentile_empty_list():
-    from diagnostics.cli import _percentile
     assert _percentile([], 0.95) == 0
 
 
 def test_percentile_single_value():
-    from diagnostics.cli import _percentile
     assert _percentile([42], 0.95) == 42
 
 
 def test_percentile_two_values():
-    from diagnostics.cli import _percentile
     assert _percentile([10, 200], 0.95) == 200
 
 
 def test_percentile_hundred_values():
-    from diagnostics.cli import _percentile
     values = list(range(1, 101))  # 1..100
     assert _percentile(values, 0.95) == 95
     assert _percentile(values, 0.50) == 50
