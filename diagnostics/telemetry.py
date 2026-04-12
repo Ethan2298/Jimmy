@@ -262,21 +262,34 @@ class SupabaseEventStore:
 
     def __init__(self, url: str, service_role_key: str, *, table: str = DEFAULT_EVENTS_TABLE) -> None:
         self.url = url.rstrip("/")
-        self.service_role_key = service_role_key.strip()
+        self._service_role_key = service_role_key.strip()
         self.table = table.strip() or DEFAULT_EVENTS_TABLE
+        self._client: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.service_role_key}",
-            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self._service_role_key}",
+            "apikey": self._service_role_key,
             "Content-Type": "application/json",
             "Prefer": "return=minimal",
         }
 
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                base_url=self.url, headers=self._headers(), timeout=15.0
+            )
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+
     async def write_event(self, event: MCPEvent) -> None:
-        async with httpx.AsyncClient(base_url=self.url, headers=self._headers(), timeout=15.0) as client:
-            response = await client.post(f"/rest/v1/{self.table}", json=[event.to_row()])
-            response.raise_for_status()
+        client = await self._get_client()
+        response = await client.post(f"/rest/v1/{self.table}", json=[event.to_row()])
+        response.raise_for_status()
 
     async def fetch_events(self, query: MCPEventQuery | None = None) -> list[MCPEvent]:
         query = query or MCPEventQuery()
@@ -286,9 +299,11 @@ class SupabaseEventStore:
             params.append(("request_id", f"eq.{query.request_id}"))
         if query.session_id:
             params.append(("session_id", f"eq.{query.session_id}"))
-        if query.since is not None:
+        if query.since is not None and query.until is not None:
+            params.append(("occurred_at", f"and(gte.{_to_iso_z(query.since)},lte.{_to_iso_z(query.until)})"))
+        elif query.since is not None:
             params.append(("occurred_at", f"gte.{_to_iso_z(query.since)}"))
-        if query.until is not None:
+        elif query.until is not None:
             params.append(("occurred_at", f"lte.{_to_iso_z(query.until)}"))
         if query.actor:
             params.append(("actor", f"eq.{query.actor}"))
@@ -299,11 +314,18 @@ class SupabaseEventStore:
         if query.success is not None:
             params.append(("success", f"eq.{str(query.success).lower()}"))
 
-        async with httpx.AsyncClient(base_url=self.url, headers=self._headers(), timeout=15.0) as client:
-            response = await client.get(f"/rest/v1/{self.table}", params=params)
-            response.raise_for_status()
-            rows = response.json()
-            return [MCPEvent.from_row(row) for row in rows]
+        client = await self._get_client()
+        response = await client.get(f"/rest/v1/{self.table}", params=params)
+        response.raise_for_status()
+        rows = response.json()
+        return [MCPEvent.from_row(row) for row in rows]
+
+    async def check_schema(self, columns: tuple[str, ...]) -> None:
+        """Verify required columns exist. Raises on failure."""
+        client = await self._get_client()
+        params = [("select", ",".join(columns)), ("limit", "1")]
+        response = await client.get(f"/rest/v1/{self.table}", params=params)
+        response.raise_for_status()
 
     async def healthcheck(self) -> bool:
         await self.fetch_events(MCPEventQuery(limit=1))
@@ -352,6 +374,9 @@ def classify_result(result: Any) -> tuple[bool, int | None, str | None, str | No
             return True, None, None, None
         if isinstance(candidate, dict):
             parsed = candidate
+        else:
+            LOGGER.debug("classify_result: JSON result is %s, not dict — treating as success", type(candidate).__name__)
+            return True, None, None, None
     elif isinstance(result, dict):
         parsed = result
 
