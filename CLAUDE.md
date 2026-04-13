@@ -61,6 +61,20 @@ Dealer (browser) <-> Next.js App Router <-> Claude API (Marcus) <-> GHL API
 - Sub-resource endpoints (`/notes`, `/tasks`, `/messages`, `/free-slots`) reject `locationId` in query params (422).
 - API version header: `Version: 2021-07-28`.
 
+### GHL API Reference (`docs/ghl-api/`)
+
+Comprehensive offline reference for every GHL API endpoint Jimmy uses or could use. **Read these docs before adding or modifying GHL tool implementations.** They contain exact endpoint paths, required parameters, request/response schemas, scopes, and known quirks.
+
+- `README.md` — Index, auth overview, quirks summary
+- `contacts.md` — Contact CRUD, upsert, tags, notes, tasks, followers, campaigns, workflows
+- `conversations.md` — Conversation search, messages, send SMS/Email/WhatsApp, recordings
+- `opportunities.md` — Deals, pipelines, stages, status updates, upsert
+- `calendars.md` — Calendars, appointments, free slots, groups, block slots, resources
+- `locations.md` — Location details, custom fields, tags, recurring tasks
+- `users.md` — User CRUD, search, permissions, scopes
+
+Source: [GoHighLevel/highlevel-api-docs](https://github.com/GoHighLevel/highlevel-api-docs) (official OpenAPI specs).
+
 ### Supabase tables
 
 - `chat_sessions` — chat threads per user
