@@ -231,6 +231,42 @@ def test_get_conversation_messages_uses_shared_success_envelope(monkeypatch, ser
     assert data["messages"][1]["body"] == "See you tomorrow"
 
 
+def test_get_conversation_messages_pagination(monkeypatch, server_module):
+    async def fake_get(path, params=None):
+        assert path == "/conversations/conv-1/messages"
+        assert params == {"lastMessageId": "msg-20"}
+        return {
+            "messages": {
+                "messages": [
+                    {
+                        "id": "msg-21",
+                        "direction": "inbound",
+                        "body": "Older message",
+                        "messageType": "SMS",
+                        "dateAdded": "2026-04-10T10:00:00Z",
+                        "source": "sms",
+                        "from": "+15551234567",
+                        "to": "+15550000000",
+                        "status": "received",
+                        "attachments": [],
+                    },
+                ],
+                "lastMessageId": "msg-21",
+                "nextPage": False,
+            }
+        }
+
+    monkeypatch.setattr(server_module.client, "get", fake_get)
+
+    result = parse_json(asyncio.run(server_module.get_conversation_messages("conv-1", last_message_id="msg-20")))
+    data = get_data(result)
+
+    assert data["count"] == 1
+    assert data["messages"][0]["body"] == "Older message"
+    assert data["lastMessageId"] == "msg-21"
+    assert data["has_more"] is False
+
+
 def test_get_opportunity_uses_shared_success_envelope(monkeypatch, server_module):
     async def fake_get(path, params=None):
         assert path == "/opportunities/opp-1"

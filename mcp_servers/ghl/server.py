@@ -274,19 +274,29 @@ async def search_conversations(contact_id: str = "", limit: int = 20) -> str:
 
 
 @mcp.tool()
-async def get_conversation_messages(conversation_id: str) -> str:
+async def get_conversation_messages(conversation_id: str, last_message_id: str = "", limit: int = 20) -> str:
     """Get the full message thread for a conversation in chronological order.
 
     Args:
         conversation_id: The GHL conversation ID returned by search_conversations.
+        last_message_id: Optional cursor for pagination. Pass the lastMessageId from a
+            previous response to fetch the next page of older messages.
+        limit: Number of messages per page. Must be between 1 and 100. Default 20.
     """
     try:
-        data = await get_client().get(f"/conversations/{conversation_id}/messages")
+        params: dict = {}
+        if last_message_id:
+            params["lastMessageId"] = last_message_id
+        if limit != 20:
+            params["limit"] = max(1, min(limit, 100))
+        data = await get_client().get(f"/conversations/{conversation_id}/messages", params or None)
         raw_messages = data.get("messages", {}).get("messages", [])
+        last_id = data.get("messages", {}).get("lastMessageId")
         messages = []
         for message in reversed(raw_messages):
             messages.append(
                 {
+                    "id": message.get("id"),
                     "direction": message.get("direction", "unknown"),
                     "body": (message.get("body") or "")[:500],
                     "messageType": message.get("messageType"),
@@ -300,7 +310,10 @@ async def get_conversation_messages(conversation_id: str) -> str:
             )
 
         has_more = data.get("messages", {}).get("nextPage", False)
-        return _success({"messages": messages, "count": len(messages), "has_more": has_more})
+        result = {"messages": messages, "count": len(messages), "has_more": has_more}
+        if last_id:
+            result["lastMessageId"] = last_id
+        return _success(result)
     except GHLAPIError as e:
         return _error(e)
 
