@@ -194,7 +194,7 @@ const conversationsInput = z.discriminatedUnion("action", [
     action: z.literal("get_messages"),
     conversation_id: z.string().describe("The GHL conversation ID."),
     last_message_id: z.string().default("").describe("Cursor for pagination. Pass the lastMessageId from a previous response to fetch the next page."),
-    limit: z.number().default(20).describe("Messages per page (1-100)."),
+    limit: z.number().min(1).max(100).default(20).describe("Messages per page (1-100)."),
   }),
   z.object({
     action: z.literal("update"),
@@ -529,7 +529,7 @@ export function registerTools(server: McpServer): void {
           case "get_messages": {
             const params: Record<string, string> = {};
             if (input.last_message_id) params.lastMessageId = input.last_message_id;
-            if (input.limit !== 20) params.limit = String(Math.max(1, Math.min(input.limit, 100)));
+            params.limit = String(input.limit);
             const data = await client().get(
               `/conversations/${input.conversation_id}/messages`,
               Object.keys(params).length ? params : undefined,

@@ -287,8 +287,7 @@ async def get_conversation_messages(conversation_id: str, last_message_id: str =
         params: dict = {}
         if last_message_id:
             params["lastMessageId"] = last_message_id
-        if limit != 20:
-            params["limit"] = max(1, min(limit, 100))
+        params["limit"] = max(1, min(limit, 100))
         data = await get_client().get(f"/conversations/{conversation_id}/messages", params or None)
         raw_messages = data.get("messages", {}).get("messages", [])
         last_id = data.get("messages", {}).get("lastMessageId")

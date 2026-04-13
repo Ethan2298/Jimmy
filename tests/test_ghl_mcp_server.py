@@ -195,6 +195,7 @@ def test_get_conversation_messages_uses_shared_success_envelope(monkeypatch, ser
             "messages": {
                 "messages": [
                     {
+                        "id": "msg-1",
                         "direction": "outbound",
                         "body": "See you tomorrow",
                         "messageType": "SMS",
@@ -206,6 +207,7 @@ def test_get_conversation_messages_uses_shared_success_envelope(monkeypatch, ser
                         "attachments": [],
                     },
                     {
+                        "id": "msg-2",
                         "direction": "inbound",
                         "body": "Sounds good",
                         "messageType": "SMS",
@@ -228,13 +230,16 @@ def test_get_conversation_messages_uses_shared_success_envelope(monkeypatch, ser
 
     assert data["count"] == 2
     assert data["messages"][0]["body"] == "Sounds good"
+    assert data["messages"][0]["id"] == "msg-2"
     assert data["messages"][1]["body"] == "See you tomorrow"
+    assert data["messages"][1]["id"] == "msg-1"
+    assert "lastMessageId" not in data
 
 
 def test_get_conversation_messages_pagination(monkeypatch, server_module):
     async def fake_get(path, params=None):
         assert path == "/conversations/conv-1/messages"
-        assert params == {"lastMessageId": "msg-20"}
+        assert params == {"lastMessageId": "msg-20", "limit": 20}
         return {
             "messages": {
                 "messages": [
@@ -265,6 +270,37 @@ def test_get_conversation_messages_pagination(monkeypatch, server_module):
     assert data["messages"][0]["body"] == "Older message"
     assert data["lastMessageId"] == "msg-21"
     assert data["has_more"] is False
+
+
+def test_get_conversation_messages_custom_limit(monkeypatch, server_module):
+    async def fake_get(path, params=None):
+        assert path == "/conversations/conv-1/messages"
+        assert params == {"limit": 50}
+        return {"messages": {"messages": [], "nextPage": False}}
+
+    monkeypatch.setattr(server_module.client, "get", fake_get)
+
+    result = parse_json(asyncio.run(server_module.get_conversation_messages("conv-1", limit=50)))
+    data = get_data(result)
+    assert data["count"] == 0
+
+
+def test_get_conversation_messages_clamps_limit(monkeypatch, server_module):
+    captured_params = {}
+
+    async def fake_get(path, params=None):
+        captured_params.update(params or {})
+        return {"messages": {"messages": [], "nextPage": False}}
+
+    monkeypatch.setattr(server_module.client, "get", fake_get)
+
+    # Limit above 100 should clamp to 100
+    asyncio.run(server_module.get_conversation_messages("conv-1", limit=200))
+    assert captured_params["limit"] == 100
+
+    # Limit below 1 should clamp to 1
+    asyncio.run(server_module.get_conversation_messages("conv-1", limit=0))
+    assert captured_params["limit"] == 1
 
 
 def test_get_opportunity_uses_shared_success_envelope(monkeypatch, server_module):
