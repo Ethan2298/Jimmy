@@ -49,12 +49,12 @@ async def load_remote_tools(url: str, auth_token: str) -> list[dict[str, Any]]:
     from mcp.client.streamable_http import streamable_http_client
     from mcp.client.session import ClientSession
 
-    http_client = httpx.AsyncClient(headers={"Authorization": f"Bearer {auth_token}"})
-    async with streamable_http_client(url, http_client=http_client) as (read_stream, write_stream, _):
-        async with ClientSession(read_stream, write_stream) as session:
-            await session.initialize()
-            result = await session.list_tools()
-            return [tool_to_dict(tool) for tool in result.tools]
+    async with httpx.AsyncClient(headers={"Authorization": f"Bearer {auth_token}"}) as http_client:
+        async with streamable_http_client(url, http_client=http_client) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                result = await session.list_tools()
+                return [tool_to_dict(tool) for tool in result.tools]
 
 
 def tool_to_dict(tool: Any) -> dict[str, Any]:
