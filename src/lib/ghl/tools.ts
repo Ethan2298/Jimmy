@@ -309,10 +309,12 @@ const usersInput = z.discriminatedUnion("action", [
 export function registerTools(server: McpServer): void {
   const client = () => getGHLClient();
 
-  server.tool(
+  server.registerTool(
     "contacts",
-    "Manage dealership contacts. Actions: search, get, upsert, update, delete.",
-    contactsInput,
+    {
+      description: "Manage dealership contacts. Actions: search, get, upsert, update, delete.",
+      inputSchema: contactsInput,
+    },
     async (input) => {
       try {
         switch (input.action) {
@@ -422,10 +424,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "contact_tags",
-    "Add or remove tags on a contact. Actions: add, remove.",
-    contactTagsInput,
+    {
+      description: "Add or remove tags on a contact. Actions: add, remove.",
+      inputSchema: contactTagsInput,
+    },
     async ({ action, contact_id, tags }) => {
       try {
         if (action === "add") {
@@ -440,10 +444,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "contact_notes",
-    "List or add notes on a contact. Actions: list, add.",
-    contactNotesInput,
+    {
+      description: "List or add notes on a contact. Actions: list, add.",
+      inputSchema: contactNotesInput,
+    },
     async (input) => {
       try {
         if (input.action === "list") {
@@ -460,10 +466,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "contact_tasks",
-    "List or create tasks for a contact. Actions: list, create.",
-    contactTasksInput,
+    {
+      description: "List or create tasks for a contact. Actions: list, create.",
+      inputSchema: contactTasksInput,
+    },
     async (input) => {
       try {
         if (input.action === "list") {
@@ -485,10 +493,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "conversations",
-    "Manage conversations. Actions: search, get_messages, update, send.",
-    conversationsInput,
+    {
+      description: "Manage conversations. Actions: search, get_messages, update, send.",
+      inputSchema: conversationsInput,
+    },
     async (input) => {
       try {
         switch (input.action) {
@@ -585,10 +595,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "pipelines",
-    "Get all sales pipelines and their stages.",
-    z.object({}),
+    {
+      description: "Get all sales pipelines and their stages.",
+      inputSchema: z.object({}),
+    },
     async () => {
       try {
         const data = await client().get("/opportunities/pipelines");
@@ -608,10 +620,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "opportunities",
-    "Manage deals/opportunities. Actions: search, get, create, update, delete.",
-    opportunitiesInput,
+    {
+      description: "Manage deals/opportunities. Actions: search, get, create, update, delete.",
+      inputSchema: opportunitiesInput,
+    },
     async (input) => {
       try {
         switch (input.action) {
@@ -698,10 +712,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "calendars",
-    "Read calendar data. Actions: list, events, free_slots.",
-    calendarsInput,
+    {
+      description: "Read calendar data. Actions: list, events, free_slots.",
+      inputSchema: calendarsInput,
+    },
     async (input) => {
       try {
         switch (input.action) {
@@ -764,10 +780,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "appointments",
-    "Manage calendar appointments. Actions: book, update, delete.",
-    appointmentsInput,
+    {
+      description: "Manage calendar appointments. Actions: book, update, delete.",
+      inputSchema: appointmentsInput,
+    },
     async (input) => {
       try {
         switch (input.action) {
@@ -821,10 +839,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "location_info",
-    "Get info about the current dealership location. Actions: details, custom_fields, tags.",
-    locationInfoInput,
+    {
+      description: "Get info about the current dealership location. Actions: details, custom_fields, tags.",
+      inputSchema: locationInfoInput,
+    },
     async ({ action }) => {
       try {
         const locationId = client().getLocationId();
@@ -848,10 +868,12 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "users",
-    "Get team members. Actions: list, get.",
-    usersInput,
+    {
+      description: "Get team members. Actions: list, get.",
+      inputSchema: usersInput,
+    },
     async (input) => {
       try {
         if (input.action === "list") {
