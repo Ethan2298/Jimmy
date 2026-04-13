@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mcp_servers.ghl.telemetry import MCPEvent, MCPEventQuery, MemoryEventStore, SupabaseEventStore, create_instrumented_mcp, summarize_value
+from diagnostics.telemetry import MCPEvent, MCPEventQuery, MemoryEventStore, SupabaseEventStore, create_instrumented_mcp, summarize_value
 
 
 def test_summarize_value_redacts_sensitive_fields():
@@ -192,18 +192,16 @@ def test_supabase_event_store_includes_request_id_and_integration_filters(monkey
             captured["headers"] = headers
             captured["timeout"] = timeout
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
+        @property
+        def is_closed(self):
+            return False
 
         async def get(self, path, params=None):
             captured["path"] = path
             captured["params"] = params
             return FakeResponse()
 
-    monkeypatch.setattr("mcp_servers.ghl.telemetry.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("diagnostics.telemetry.httpx.AsyncClient", FakeAsyncClient)
 
     store = SupabaseEventStore("https://example.supabase.co", "service-role", table="mcp_events")
     asyncio.run(
@@ -217,3 +215,145 @@ def test_supabase_event_store_includes_request_id_and_integration_filters(monkey
     assert ("request_id", "eq.req-123") in params
     assert ("integration_category", "eq.GHL") in params
     assert ("limit", "5") in params
+
+
+def test_supabase_event_store_includes_session_id_filter(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return []
+
+    class FakeAsyncClient:
+        def __init__(self, *, base_url, headers, timeout):
+            pass
+
+        @property
+        def is_closed(self):
+            return False
+
+        async def get(self, path, params=None):
+            captured["params"] = params
+            return FakeResponse()
+
+    monkeypatch.setattr("diagnostics.telemetry.httpx.AsyncClient", FakeAsyncClient)
+
+    store = SupabaseEventStore("https://example.supabase.co", "service-role", table="mcp_events")
+    asyncio.run(
+        store.fetch_events(
+            MCPEventQuery(session_id="session-abc", limit=10)
+        )
+    )
+
+    params = captured["params"]
+    assert ("session_id", "eq.session-abc") in params
+
+
+def test_supabase_event_store_includes_until_filter(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return []
+
+    class FakeAsyncClient:
+        def __init__(self, *, base_url, headers, timeout):
+            pass
+
+        @property
+        def is_closed(self):
+            return False
+
+        async def get(self, path, params=None):
+            captured["params"] = params
+            return FakeResponse()
+
+    monkeypatch.setattr("diagnostics.telemetry.httpx.AsyncClient", FakeAsyncClient)
+
+    until_dt = datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc)
+    store = SupabaseEventStore("https://example.supabase.co", "service-role", table="mcp_events")
+    asyncio.run(
+        store.fetch_events(
+            MCPEventQuery(until=until_dt, limit=10)
+        )
+    )
+
+    params = captured["params"]
+    until_params = [v for k, v in params if k == "occurred_at" and v.startswith("lte.")]
+    assert len(until_params) == 1
+    assert "2026-04-10T12:00:00Z" in until_params[0]
+
+
+def test_supabase_event_store_write_event_sends_post(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, *, base_url, headers, timeout):
+            captured["base_url"] = base_url
+
+        @property
+        def is_closed(self):
+            return False
+
+        async def post(self, path, json=None):
+            captured["path"] = path
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("diagnostics.telemetry.httpx.AsyncClient", FakeAsyncClient)
+
+    store = SupabaseEventStore("https://example.supabase.co", "service-role", table="mcp_events")
+    event = MCPEvent(
+        request_id="req-write-1",
+        timestamp=datetime(2026, 4, 11, 12, 0, tzinfo=timezone.utc),
+        actor="ethan",
+        session_id="session-1",
+        integration_category="GHL",
+        tool_name="search_contacts",
+        duration_ms=50,
+        success=True,
+        error_code=None,
+        scope_required=None,
+        upstream_status=None,
+        payload_summary={"tool": "search_contacts"},
+    )
+    asyncio.run(store.write_event(event))
+
+    assert captured["path"] == "/rest/v1/mcp_events"
+    rows = captured["json"]
+    assert len(rows) == 1
+    assert rows[0]["request_id"] == "req-write-1"
+    assert rows[0]["tool_name"] == "search_contacts"
+    assert rows[0]["success"] is True
+
+
+def test_memory_event_store_filters_by_session_id():
+    store = MemoryEventStore()
+    event_a = MCPEvent(
+        request_id="req-1", timestamp=datetime.now(timezone.utc), actor="ethan",
+        session_id="session-a", integration_category="GHL", tool_name="search_contacts",
+        duration_ms=50, success=True, error_code=None, scope_required=None,
+        upstream_status=None, payload_summary={},
+    )
+    event_b = MCPEvent(
+        request_id="req-2", timestamp=datetime.now(timezone.utc), actor="ethan",
+        session_id="session-b", integration_category="GHL", tool_name="get_contact",
+        duration_ms=30, success=True, error_code=None, scope_required=None,
+        upstream_status=None, payload_summary={},
+    )
+    asyncio.run(store.write_event(event_a))
+    asyncio.run(store.write_event(event_b))
+
+    events = asyncio.run(store.fetch_events(MCPEventQuery(session_id="session-a", limit=10)))
+    assert len(events) == 1
+    assert events[0].session_id == "session-a"
