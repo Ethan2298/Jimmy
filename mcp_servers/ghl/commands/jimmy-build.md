@@ -18,14 +18,14 @@ Help the user create a custom skill that gets saved to the knowledge base and is
      - execute = act directly, report results
      - review = read-only analysis
    - **Steps**: Walk through what the skill should do. Help the user map their workflow to available MCP tools:
-     - Contacts: search_contacts, get_contact, update_contact, create_or_update_contact, add_contact_tags, remove_contact_tags
-     - Deals: search_opportunities, get_opportunity, create_opportunity, update_opportunity, delete_opportunity
-     - Conversations: search_conversations, get_conversation_messages, send_message
-     - Calendar: list_calendars, get_calendar_events, get_calendar_free_slots, book_appointment
-     - Tasks: get_contact_tasks, create_contact_task
-     - Notes: get_contact_notes, add_contact_note
-     - Pipeline: get_pipelines
-     - Location: get_location, get_location_tags, get_location_custom_fields, get_users
+     - Contacts: `contacts` (search, get, upsert, update, delete) and `contact_tags` (add, remove)
+     - Deals: `opportunities` (search, get, create, update, delete)
+     - Conversations: `conversations` (search, get_messages, update, send)
+     - Calendar: `calendars` (list, events, free_slots) and `appointments` (book, update, delete)
+     - Tasks: `contact_tasks` (list, create)
+     - Notes: `contact_notes` (list, add)
+     - Pipeline: `pipelines`
+     - Location: `location_info` (details, tags, custom_fields) and `users` (list, get)
      - Knowledge Base: kb_list, kb_read, kb_write, kb_search
 3. Assemble the skill doc using the template format from step 1.
 4. Call `kb_write` with name "skill-[slug]" and the assembled markdown content.

@@ -17,7 +17,7 @@ Run a skill or list what's available. Usage: `/jimmy` to list, `/jimmy triage` t
    - **plan**: Present findings and ask the user before taking any write actions (create, update, delete, send).
    - **execute**: Act on each step directly. Report results as you go.
    - **review**: Read-only analysis. Do not call any tools that modify data.
-5. Execute the instructions step by step using the available MCP tools (search_contacts, get_pipelines, send_message, etc.).
+5. Execute the instructions step by step using the available MCP tools (contacts with `action: "search"`, pipelines, conversations with `action: "send"`, etc.).
 6. When done, summarize what was accomplished.
 
 ### If no argument — list skills:
