@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -10,6 +12,8 @@ from diagnostics.telemetry import (
     MCPEvent,
     MCPEventQuery,
     MCPEventStore,
+    SupabaseEventStore,
+    to_iso_z,
     create_event_store_from_env,
 )
 from diagnostics.reports import (
@@ -31,7 +35,6 @@ from diagnostics.reports import (
     build_trace_report,
     format_trace_report,
     format_trace_not_found,
-    _percentile,
 )
 from diagnostics.health import (
     HealthCheckResult,
@@ -42,10 +45,10 @@ from diagnostics.health import (
     format_health_report,
 )
 from diagnostics.inspect import (
-    _load_local_tools,
-    _load_remote_tools,
-    _tool_to_dict,
-    _categorize_tools,
+    load_local_tools,
+    load_remote_tools,
+    tool_to_dict,
+    categorize_tools,
     build_inspect_report,
     format_inspect_report,
     build_inspector_command,
@@ -88,8 +91,19 @@ async def _load_events(
     return await store.fetch_events(query)
 
 
+def _json_default(obj: Any) -> Any:
+    if isinstance(obj, datetime):
+        return to_iso_z(obj)
+    if isinstance(obj, MCPEvent):
+        return obj.to_row()
+    if isinstance(obj, Counter):
+        return dict(obj)
+    return str(obj)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jimmy-diag", description="Jimmy diagnostics CLI")
+    parser.add_argument("--json", action="store_true", default=False, help="Output as JSON instead of human text")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def add_common_arguments(command_parser: argparse.ArgumentParser, *, default_days: int, default_limit: int = 1000) -> None:
@@ -150,22 +164,37 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _format_or_json(report: dict[str, Any], formatter, *, use_json: bool) -> str:
+    if use_json:
+        return json.dumps(report, default=_json_default, indent=2)
+    return formatter(report)
+
+
 async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None = None) -> str:
     resolved_store = store or create_event_store_from_env()
+    try:
+        return await _run_command_inner(args, resolved_store=resolved_store)
+    finally:
+        if isinstance(resolved_store, SupabaseEventStore):
+            await resolved_store.close()
+
+
+async def _run_command_inner(args: argparse.Namespace, *, resolved_store: MCPEventStore) -> str:
     store_configured = getattr(resolved_store, "enabled", True)
+    use_json = getattr(args, "json", False)
 
     if args.command == "inspect":
         if args.remote:
             token = args.token or os.getenv("MCP_AUTH_TOKEN", "").strip()
             if not token:
                 raise RuntimeError("Auth token required for remote inspect. Use --token or set MCP_AUTH_TOKEN.")
-            tools = await _load_remote_tools(args.remote, token)
+            tools = await load_remote_tools(args.remote, token)
             mode = f"remote ({args.remote})"
         else:
-            tools = await _load_local_tools()
+            tools = await load_local_tools()
             mode = "local"
         report = build_inspect_report(tools, mode=mode, show_schema=args.schema, tool_filter=args.tool)
-        return format_inspect_report(report)
+        return _format_or_json(report, format_inspect_report, use_json=use_json)
 
     if args.command == "health":
         results = [
@@ -174,8 +203,12 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
             await check_supabase_schema(resolved_store),
             await check_ghl_probe(),
         ]
-        output = format_health_report(results)
-        if not all(result.healthy for result in results):
+        if use_json:
+            report = [{"name": r.name, "healthy": r.healthy, "detail": r.detail} for r in results]
+            output = json.dumps({"checks": report, "healthy": all(r.healthy for r in results)}, indent=2)
+        else:
+            output = format_health_report(results)
+        if not all(r.healthy for r in results):
             raise CLICommandError(output)
         return output
 
@@ -190,7 +223,8 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
         )
         if not events:
             raise CLICommandError(format_trace_not_found(args.request_id, integration=args.integration))
-        return format_trace_report(build_trace_report(events[0]))
+        report = build_trace_report(events[0])
+        return _format_or_json(report, format_trace_report, use_json=use_json)
 
     if args.command == "session":
         if not store_configured:
@@ -200,7 +234,7 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
         if not session_events:
             raise CLICommandError(format_session_not_found(args.session_id))
         report = build_session_report(session_events, session_id=args.session_id)
-        return format_session_report(report)
+        return _format_or_json(report, format_session_report, use_json=use_json)
 
     if args.command == "anomalies":
         if not store_configured:
@@ -232,7 +266,9 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
             threshold=args.threshold,
             integration=args.integration,
         )
-        return format_anomalies_report(report)
+        return _format_or_json(report, format_anomalies_report, use_json=use_json)
+
+    # --- event-based commands: load events, then dispatch ---
 
     events = await _load_events(
         resolved_store,
@@ -250,26 +286,34 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
             window_days=args.days,
             integration=args.integration,
         )
-        return format_status_report(report)
+        return _format_or_json(report, format_status_report, use_json=use_json)
 
     if not store_configured:
         raise RuntimeError("Supabase event store is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
 
-    if args.command == "failures":
-        report = build_failures_report(events, limit=args.recent_limit, integration=args.integration)
-        return format_failures_report(report)
+    _EVENT_COMMANDS: dict[str, tuple[Any, Any]] = {
+        "failures": (
+            lambda: build_failures_report(events, limit=args.recent_limit, integration=args.integration),
+            format_failures_report,
+        ),
+        "latency": (
+            lambda: build_latency_report(events, integration=args.integration),
+            format_latency_report,
+        ),
+        "usage": (
+            lambda: build_usage_report(events, integration=args.integration),
+            format_usage_report,
+        ),
+        "reliability": (
+            lambda: build_reliability_report(events, integration=args.integration),
+            format_reliability_report,
+        ),
+    }
 
-    if args.command == "latency":
-        report = build_latency_report(events, integration=args.integration)
-        return format_latency_report(report)
-
-    if args.command == "usage":
-        report = build_usage_report(events, integration=args.integration)
-        return format_usage_report(report)
-
-    if args.command == "reliability":
-        report = build_reliability_report(events, integration=args.integration)
-        return format_reliability_report(report)
+    if args.command in _EVENT_COMMANDS:
+        builder, formatter = _EVENT_COMMANDS[args.command]
+        report = builder()
+        return _format_or_json(report, formatter, use_json=use_json)
 
     raise ValueError(f"Unknown command: {args.command}")
 

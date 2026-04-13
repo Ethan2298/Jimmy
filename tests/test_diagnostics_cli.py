@@ -1,4 +1,6 @@
 import asyncio
+import json
+import uuid
 from argparse import Namespace
 from datetime import datetime, timedelta, timezone
 import sys
@@ -35,7 +37,7 @@ from diagnostics.reports import (
     format_status_report,
     format_trace_report,
     format_usage_report,
-    _percentile,
+    percentile,
 )
 from diagnostics.health import HealthCheckResult
 from diagnostics.inspect import (
@@ -43,8 +45,8 @@ from diagnostics.inspect import (
     build_inspector_command,
     format_inspect_report,
     format_inspector_launch,
-    _tool_to_dict,
-    _categorize_tools,
+    tool_to_dict,
+    categorize_tools,
 )
 from diagnostics.telemetry import MCPEvent, MemoryEventStore
 
@@ -64,7 +66,7 @@ def make_event(
     payload_summary: dict | None = None,
 ) -> MCPEvent:
     return MCPEvent(
-        request_id=request_id or f"req-{tool_name}-{duration_ms}-{success}",
+        request_id=request_id or f"req-{uuid.uuid4().hex[:8]}",
         timestamp=timestamp or datetime(2026, 4, 11, 12, 0, tzinfo=timezone.utc),
         actor=actor,
         session_id="session-1",
@@ -149,7 +151,7 @@ def test_latency_report_computes_tool_stats():
 
     assert report["event_count"] == 3
     assert report["tool_stats"]["search_contacts"]["count"] == 2
-    assert report["tool_stats"]["search_contacts"]["p95_ms"] == 120
+    assert report["tool_stats"]["search_contacts"]["p95_ms"] == 118
     assert report["integration_stats"]["GHL"]["count"] == 2
     assert "Jimmy latency" in format_latency_report(report)
     assert "integration" in format_latency_report(report)
@@ -639,7 +641,7 @@ def test_anomalies_command_via_run_command():
 
 
 def _make_fake_tool(name, description="A tool", params=None):
-    """Build a tool dict matching _tool_to_dict output."""
+    """Build a tool dict matching tool_to_dict output."""
     params = params or []
     return {
         "name": name,
@@ -728,7 +730,7 @@ def test_inspect_format_shows_schema_details():
 def test_inspect_categorize_puts_unknown_in_other():
     tools = [_make_fake_tool("custom_widget")]
 
-    categories = _categorize_tools(tools)
+    categories = categorize_tools(tools)
 
     assert "other" in categories
     assert categories["other"][0]["name"] == "custom_widget"
@@ -747,7 +749,7 @@ def test_tool_to_dict_parses_mcp_tool():
             "type": "object",
         }
 
-    result = _tool_to_dict(FakeTool())
+    result = tool_to_dict(FakeTool())
 
     assert result["name"] == "search_contacts"
     assert result["description"] == "Search contacts."
@@ -773,7 +775,7 @@ def test_inspect_command_local_via_run_command(monkeypatch):
     async def fake_load_local():
         return fake_tools
 
-    monkeypatch.setattr(cli_module, "_load_local_tools", fake_load_local)
+    monkeypatch.setattr(cli_module, "load_local_tools", fake_load_local)
 
 
     output = asyncio.run(
@@ -1033,21 +1035,21 @@ def test_session_integrations_sorted_deterministically():
 
 
 def test_percentile_empty_list():
-    assert _percentile([], 0.95) == 0
+    assert percentile([], 0.95) == 0
 
 
 def test_percentile_single_value():
-    assert _percentile([42], 0.95) == 42
+    assert percentile([42], 0.95) == 42
 
 
 def test_percentile_two_values():
-    assert _percentile([10, 200], 0.95) == 200
+    assert percentile([10, 200], 0.95) == 190
 
 
 def test_percentile_hundred_values():
     values = list(range(1, 101))  # 1..100
-    assert _percentile(values, 0.95) == 95
-    assert _percentile(values, 0.50) == 50
+    assert percentile(values, 0.95) == 95
+    assert percentile(values, 0.50) == 50
 
 
 # --- MCPEvent.from_row with corrupt/missing data ---
@@ -1140,3 +1142,55 @@ def test_anomalies_via_run_command_excludes_current_from_baseline():
     assert "current window: 1d (1 events" in output
     # Baseline should NOT include the current-day failure
     assert "baseline window: 6d (1 events" in output
+
+
+# ===================================================================
+# END-TO-END CLI TESTS
+# ===================================================================
+
+
+def test_end_to_end_cli_status(monkeypatch, capsys):
+    """End-to-end: main() -> parse args -> run_command -> format output."""
+    store = MemoryEventStore()
+    asyncio.run(store.write_event(make_event("search_contacts")))
+
+    monkeypatch.setattr(cli_module, "create_event_store_from_env", lambda: store)
+
+    exit_code = main(["status", "--days", "7"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Jimmy status" in captured.out
+    assert "events: 1" in captured.out
+
+
+def test_end_to_end_cli_json_output(monkeypatch, capsys):
+    """End-to-end: main() with --json outputs valid JSON."""
+    store = MemoryEventStore()
+    asyncio.run(store.write_event(make_event("search_contacts", duration_ms=80)))
+    asyncio.run(store.write_event(make_event("send_message", success=False, error_code="http:403")))
+
+    monkeypatch.setattr(cli_module, "create_event_store_from_env", lambda: store)
+
+    exit_code = main(["--json", "status", "--days", "7"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    data = json.loads(captured.out)
+    assert data["event_count"] == 2
+    assert data["failure_count"] == 1
+    assert data["store_configured"] is True
+
+
+def test_end_to_end_cli_failures(monkeypatch, capsys):
+    """End-to-end: main() -> failures command."""
+    store = MemoryEventStore()
+    asyncio.run(store.write_event(make_event("send_message", success=False, error_code="http:403")))
+
+    monkeypatch.setattr(cli_module, "create_event_store_from_env", lambda: store)
+
+    exit_code = main(["failures", "--days", "7"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "total failures: 1" in captured.out

@@ -38,7 +38,7 @@ class GHLClient {
   private static SNAKE_CASE_ENDPOINTS = new Set(["/opportunities/search"]);
 
   // Sub-resource endpoints that reject locationId in query params (422)
-  private static NO_LOCATION_PATTERNS = ["/notes", "/tasks", "/messages", "/free-slots"];
+  private static NO_LOCATION_PATTERNS = ["/notes", "/tasks", "/messages", "/free-slots", "/customFields"];
 
   private needsLocation(path: string): boolean {
     for (const pattern of GHLClient.NO_LOCATION_PATTERNS) {

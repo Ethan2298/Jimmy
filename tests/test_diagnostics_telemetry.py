@@ -192,11 +192,9 @@ def test_supabase_event_store_includes_request_id_and_integration_filters(monkey
             captured["headers"] = headers
             captured["timeout"] = timeout
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
+        @property
+        def is_closed(self):
+            return False
 
         async def get(self, path, params=None):
             captured["path"] = path
@@ -233,11 +231,9 @@ def test_supabase_event_store_includes_session_id_filter(monkeypatch):
         def __init__(self, *, base_url, headers, timeout):
             pass
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
+        @property
+        def is_closed(self):
+            return False
 
         async def get(self, path, params=None):
             captured["params"] = params
@@ -270,11 +266,9 @@ def test_supabase_event_store_includes_until_filter(monkeypatch):
         def __init__(self, *, base_url, headers, timeout):
             pass
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
+        @property
+        def is_closed(self):
+            return False
 
         async def get(self, path, params=None):
             captured["params"] = params
@@ -294,6 +288,53 @@ def test_supabase_event_store_includes_until_filter(monkeypatch):
     until_params = [v for k, v in params if k == "occurred_at" and v.startswith("lte.")]
     assert len(until_params) == 1
     assert "2026-04-10T12:00:00Z" in until_params[0]
+
+
+def test_supabase_event_store_write_event_sends_post(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, *, base_url, headers, timeout):
+            captured["base_url"] = base_url
+
+        @property
+        def is_closed(self):
+            return False
+
+        async def post(self, path, json=None):
+            captured["path"] = path
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("diagnostics.telemetry.httpx.AsyncClient", FakeAsyncClient)
+
+    store = SupabaseEventStore("https://example.supabase.co", "service-role", table="mcp_events")
+    event = MCPEvent(
+        request_id="req-write-1",
+        timestamp=datetime(2026, 4, 11, 12, 0, tzinfo=timezone.utc),
+        actor="ethan",
+        session_id="session-1",
+        integration_category="GHL",
+        tool_name="search_contacts",
+        duration_ms=50,
+        success=True,
+        error_code=None,
+        scope_required=None,
+        upstream_status=None,
+        payload_summary={"tool": "search_contacts"},
+    )
+    asyncio.run(store.write_event(event))
+
+    assert captured["path"] == "/rest/v1/mcp_events"
+    rows = captured["json"]
+    assert len(rows) == 1
+    assert rows[0]["request_id"] == "req-write-1"
+    assert rows[0]["tool_name"] == "search_contacts"
+    assert rows[0]["success"] is True
 
 
 def test_memory_event_store_filters_by_session_id():

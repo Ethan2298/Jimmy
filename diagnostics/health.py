@@ -73,11 +73,8 @@ async def check_supabase_schema(store: MCPEventStore) -> HealthCheckResult:
     if not isinstance(store, SupabaseEventStore):
         return HealthCheckResult("schema validation", False, "event store is not configured")
 
-    params = [("select", ",".join(REQUIRED_SCHEMA_COLUMNS)), ("limit", "1")]
     try:
-        async with httpx.AsyncClient(base_url=store.url, headers=store._headers(), timeout=15.0) as client:
-            response = await client.get(f"/rest/v1/{store.table}", params=params)
-            response.raise_for_status()
+        await store.check_schema(REQUIRED_SCHEMA_COLUMNS)
     except Exception as exc:
         return HealthCheckResult("schema validation", False, str(exc))
 

@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Awaitable
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 
 DEFAULT_EVENTS_TABLE = "mcp_events"
 DEFAULT_INTEGRATION_CATEGORY = "GHL"
-SENSITIVE_KEYWORDS = (
+SENSITIVE_KEYWORDS = frozenset({
     "body",
     "content",
     "message",
@@ -31,14 +32,21 @@ SENSITIVE_KEYWORDS = (
     "secret",
     "password",
     "attachment",
-)
+    "ssn",
+    "dob",
+    "credit_card",
+    "cvv",
+    "pin",
+})
+
+_WORD_SPLIT_RE = re.compile(r"[^a-z]+")
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _to_iso_z(value: datetime) -> str:
+def to_iso_z(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -71,8 +79,8 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def _is_sensitive_key(key: str) -> bool:
-    lowered = key.lower()
-    return any(keyword in lowered for keyword in SENSITIVE_KEYWORDS)
+    segments = set(_WORD_SPLIT_RE.split(key.lower()))
+    return bool(segments & SENSITIVE_KEYWORDS)
 
 
 def summarize_value(value: Any, *, key: str | None = None) -> Any:
@@ -146,7 +154,7 @@ class MCPEvent:
     def to_row(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
-            "occurred_at": _to_iso_z(self.timestamp),
+            "occurred_at": to_iso_z(self.timestamp),
             "actor": self.actor,
             "session_id": self.session_id,
             "integration_category": self.integration_category,
@@ -161,7 +169,7 @@ class MCPEvent:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "MCPEvent":
-        occurred_at = row.get("occurred_at") or row.get("timestamp") or _to_iso_z(_utc_now())
+        occurred_at = row.get("occurred_at") or row.get("timestamp") or to_iso_z(_utc_now())
         timestamp = _parse_iso_z(str(occurred_at))
         payload_summary = row.get("payload_summary") or {}
         if isinstance(payload_summary, str):
@@ -262,21 +270,34 @@ class SupabaseEventStore:
 
     def __init__(self, url: str, service_role_key: str, *, table: str = DEFAULT_EVENTS_TABLE) -> None:
         self.url = url.rstrip("/")
-        self.service_role_key = service_role_key.strip()
+        self._service_role_key = service_role_key.strip()
         self.table = table.strip() or DEFAULT_EVENTS_TABLE
+        self._client: httpx.AsyncClient | None = None
 
     def _headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self.service_role_key}",
-            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self._service_role_key}",
+            "apikey": self._service_role_key,
             "Content-Type": "application/json",
             "Prefer": "return=minimal",
         }
 
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                base_url=self.url, headers=self._headers(), timeout=15.0
+            )
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+
     async def write_event(self, event: MCPEvent) -> None:
-        async with httpx.AsyncClient(base_url=self.url, headers=self._headers(), timeout=15.0) as client:
-            response = await client.post(f"/rest/v1/{self.table}", json=[event.to_row()])
-            response.raise_for_status()
+        client = await self._get_client()
+        response = await client.post(f"/rest/v1/{self.table}", json=[event.to_row()])
+        response.raise_for_status()
 
     async def fetch_events(self, query: MCPEventQuery | None = None) -> list[MCPEvent]:
         query = query or MCPEventQuery()
@@ -287,9 +308,9 @@ class SupabaseEventStore:
         if query.session_id:
             params.append(("session_id", f"eq.{query.session_id}"))
         if query.since is not None:
-            params.append(("occurred_at", f"gte.{_to_iso_z(query.since)}"))
+            params.append(("occurred_at", f"gte.{to_iso_z(query.since)}"))
         if query.until is not None:
-            params.append(("occurred_at", f"lte.{_to_iso_z(query.until)}"))
+            params.append(("occurred_at", f"lte.{to_iso_z(query.until)}"))
         if query.actor:
             params.append(("actor", f"eq.{query.actor}"))
         if query.integration_category:
@@ -299,11 +320,18 @@ class SupabaseEventStore:
         if query.success is not None:
             params.append(("success", f"eq.{str(query.success).lower()}"))
 
-        async with httpx.AsyncClient(base_url=self.url, headers=self._headers(), timeout=15.0) as client:
-            response = await client.get(f"/rest/v1/{self.table}", params=params)
-            response.raise_for_status()
-            rows = response.json()
-            return [MCPEvent.from_row(row) for row in rows]
+        client = await self._get_client()
+        response = await client.get(f"/rest/v1/{self.table}", params=params)
+        response.raise_for_status()
+        rows = response.json()
+        return [MCPEvent.from_row(row) for row in rows]
+
+    async def check_schema(self, columns: tuple[str, ...]) -> None:
+        """Verify required columns exist. Raises on failure."""
+        client = await self._get_client()
+        params = [("select", ",".join(columns)), ("limit", "1")]
+        response = await client.get(f"/rest/v1/{self.table}", params=params)
+        response.raise_for_status()
 
     async def healthcheck(self) -> bool:
         await self.fetch_events(MCPEventQuery(limit=1))
@@ -352,6 +380,9 @@ def classify_result(result: Any) -> tuple[bool, int | None, str | None, str | No
             return True, None, None, None
         if isinstance(candidate, dict):
             parsed = candidate
+        else:
+            LOGGER.debug("classify_result: JSON result is %s, not dict — treating as success", type(candidate).__name__)
+            return True, None, None, None
     elif isinstance(result, dict):
         parsed = result
 
@@ -381,7 +412,18 @@ class InstrumentedFastMCP:
         self._app = app
         self.event_store: MCPEventStore = event_store or create_event_store_from_env()
 
+    @property
+    def name(self) -> str:
+        return self._app.name
+
+    def run(self, *args: Any, **kwargs: Any) -> Any:
+        return self._app.run(*args, **kwargs)
+
+    async def list_tools(self) -> Any:
+        return await self._app.list_tools()
+
     def __getattr__(self, name: str) -> Any:
+        """Fallback for any FastMCP attribute not explicitly delegated."""
         return getattr(self._app, name)
 
     def tool(self, *decorator_args: Any, **decorator_kwargs: Any):

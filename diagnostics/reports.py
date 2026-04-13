@@ -1,11 +1,131 @@
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from statistics import mean
-from typing import Any
+from typing import Any, TypedDict
 
 from diagnostics.telemetry import MCPEvent
+
+
+# --- report types ---
+
+
+class LatencyStats(TypedDict):
+    count: int
+    avg_ms: int
+    p95_ms: int
+    max_ms: int
+
+
+class StatusReport(TypedDict):
+    store_configured: bool
+    window_days: int
+    integration_filter: str | None
+    event_count: int
+    failure_count: int
+    last_event_at: datetime | None
+    p95_ms: int
+    top_tool: tuple[str, int] | None
+    top_actor: tuple[str, int] | None
+    top_integration: tuple[str, int] | None
+
+
+class FailuresReport(TypedDict):
+    integration_filter: str | None
+    failure_count: int
+    failure_codes: Counter[str]
+    failure_integrations: Counter[str]
+    recent_failures: list[MCPEvent]
+
+
+class LatencyReport(TypedDict):
+    integration_filter: str | None
+    event_count: int
+    tool_stats: dict[str, LatencyStats]
+    integration_stats: dict[str, LatencyStats]
+    overall_avg_ms: int
+    overall_p95_ms: int
+
+
+class UsageReport(TypedDict):
+    integration_filter: str | None
+    event_count: int
+    successful_count: int
+    failure_count: int
+    tool_counts: Counter[str]
+    actor_counts: Counter[str]
+    integration_counts: Counter[str]
+
+
+class ToolReliabilityEntry(TypedDict):
+    total: int
+    success: int
+    failure: int
+    success_rate: float
+    top_errors: list[tuple[str, int]]
+
+
+class ReliabilityReport(TypedDict):
+    integration_filter: str | None
+    event_count: int
+    overall_success_rate: float
+    tool_reliability: dict[str, ToolReliabilityEntry]
+
+
+class SessionReport(TypedDict):
+    session_id: str
+    event_count: int
+    success_count: int
+    failure_count: int
+    total_tool_duration_ms: int
+    first_event: datetime | None
+    last_event: datetime | None
+    actors: list[str]
+    integrations: list[str]
+    tool_sequence: list[str]
+    events: list[MCPEvent]
+
+
+class AnomalyAlert(TypedDict):
+    signal: str
+    current: str
+    baseline: str
+    change: str
+
+
+class WindowStats(TypedDict):
+    days: int
+    total: int
+    per_day: float
+    failure_rate: float
+    avg_latency_ms: int
+    tool_counts: Counter[str]
+    error_counts: Counter[str]
+
+
+class AnomaliesReport(TypedDict):
+    integration_filter: str | None
+    current_window: WindowStats
+    baseline_window: WindowStats
+    threshold: float
+    alerts: list[AnomalyAlert]
+
+
+class TraceReport(TypedDict):
+    request_id: str
+    timestamp: datetime
+    actor: str
+    session_id: str | None
+    integration_category: str
+    tool_name: str
+    success: bool
+    duration_ms: int
+    upstream_status: int | None
+    scope_required: str | None
+    error_code: str | None
+    payload_summary: dict[str, Any]
 
 
 def _format_dt(value: datetime | None) -> str:
@@ -14,22 +134,25 @@ def _format_dt(value: datetime | None) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
 
 
-def _percentile(values: list[int], pct: float) -> int:
+def percentile(values: list[int], pct: float) -> int:
     if not values:
         return 0
     ordered = sorted(values)
-    if len(ordered) == 1:
+    n = len(ordered)
+    if n == 1:
         return ordered[0]
-    rank = int((len(ordered) * pct) + 0.999999)
-    index = min(max(rank - 1, 0), len(ordered) - 1)
-    return ordered[index]
+    pos = pct * (n - 1)
+    low = int(pos)
+    high = min(low + 1, n - 1)
+    fraction = pos - low
+    return int(round(ordered[low] + fraction * (ordered[high] - ordered[low])))
 
 
 def _top_rows(counter: Counter[str], limit: int = 5) -> list[tuple[str, int]]:
     return sorted(counter.items(), key=lambda item: (-item[1], item[0]))[:limit]
 
 
-def _tool_stats(events: list[MCPEvent]) -> dict[str, dict[str, Any]]:
+def _tool_stats(events: list[MCPEvent]) -> dict[str, LatencyStats]:
     buckets: dict[str, list[int]] = defaultdict(list)
     for event in events:
         buckets[event.tool_name].append(event.duration_ms)
@@ -39,13 +162,13 @@ def _tool_stats(events: list[MCPEvent]) -> dict[str, dict[str, Any]]:
         stats[tool_name] = {
             "count": len(durations),
             "avg_ms": int(round(mean(durations))) if durations else 0,
-            "p95_ms": _percentile(durations, 0.95),
+            "p95_ms": percentile(durations, 0.95),
             "max_ms": max(durations) if durations else 0,
         }
     return dict(sorted(stats.items(), key=lambda item: (-item[1]["count"], item[0])))
 
 
-def _integration_stats(events: list[MCPEvent]) -> dict[str, dict[str, Any]]:
+def _integration_stats(events: list[MCPEvent]) -> dict[str, LatencyStats]:
     buckets: dict[str, list[int]] = defaultdict(list)
     for event in events:
         buckets[event.integration_category].append(event.duration_ms)
@@ -55,7 +178,7 @@ def _integration_stats(events: list[MCPEvent]) -> dict[str, dict[str, Any]]:
         stats[category] = {
             "count": len(durations),
             "avg_ms": int(round(mean(durations))) if durations else 0,
-            "p95_ms": _percentile(durations, 0.95),
+            "p95_ms": percentile(durations, 0.95),
             "max_ms": max(durations) if durations else 0,
         }
     return dict(sorted(stats.items(), key=lambda item: (-item[1]["count"], item[0])))
@@ -64,7 +187,7 @@ def _integration_stats(events: list[MCPEvent]) -> dict[str, dict[str, Any]]:
 # --- status ---
 
 
-def build_status_report(events: list[MCPEvent], *, store_configured: bool, window_days: int, integration: str | None = None) -> dict[str, Any]:
+def build_status_report(events: list[MCPEvent], *, store_configured: bool, window_days: int, integration: str | None = None) -> StatusReport:
     failures = [event for event in events if not event.success]
     latency_values = [event.duration_ms for event in events]
     tool_counts = Counter(event.tool_name for event in events)
@@ -78,14 +201,14 @@ def build_status_report(events: list[MCPEvent], *, store_configured: bool, windo
         "event_count": len(events),
         "failure_count": len(failures),
         "last_event_at": last_event_at,
-        "p95_ms": _percentile(latency_values, 0.95),
+        "p95_ms": percentile(latency_values, 0.95),
         "top_tool": _top_rows(tool_counts, 1)[0] if tool_counts else None,
         "top_actor": _top_rows(actor_counts, 1)[0] if actor_counts else None,
         "top_integration": _top_rows(integration_counts, 1)[0] if integration_counts else None,
     }
 
 
-def format_status_report(report: dict[str, Any]) -> str:
+def format_status_report(report: StatusReport) -> str:
     lines = [
         "Jimmy status",
         f"- event store: {'configured' if report['store_configured'] else 'not configured'}",
@@ -116,7 +239,7 @@ def format_status_report(report: dict[str, Any]) -> str:
 # --- failures ---
 
 
-def build_failures_report(events: list[MCPEvent], *, limit: int, integration: str | None = None) -> dict[str, Any]:
+def build_failures_report(events: list[MCPEvent], *, limit: int, integration: str | None = None) -> FailuresReport:
     failures = [event for event in events if not event.success]
     failure_codes = Counter(event.error_code or "unknown" for event in failures)
     failure_integrations = Counter(event.integration_category for event in failures)
@@ -130,7 +253,7 @@ def build_failures_report(events: list[MCPEvent], *, limit: int, integration: st
     }
 
 
-def format_failures_report(report: dict[str, Any]) -> str:
+def format_failures_report(report: FailuresReport) -> str:
     lines = [
         "Jimmy failures",
         f"- total failures: {report['failure_count']}",
@@ -159,7 +282,7 @@ def format_failures_report(report: dict[str, Any]) -> str:
 # --- latency ---
 
 
-def build_latency_report(events: list[MCPEvent], *, integration: str | None = None) -> dict[str, Any]:
+def build_latency_report(events: list[MCPEvent], *, integration: str | None = None) -> LatencyReport:
     stats = _tool_stats(events)
     integration_stats = _integration_stats(events)
     return {
@@ -168,11 +291,11 @@ def build_latency_report(events: list[MCPEvent], *, integration: str | None = No
         "tool_stats": stats,
         "integration_stats": integration_stats,
         "overall_avg_ms": int(round(mean([event.duration_ms for event in events]))) if events else 0,
-        "overall_p95_ms": _percentile([event.duration_ms for event in events], 0.95),
+        "overall_p95_ms": percentile([event.duration_ms for event in events], 0.95),
     }
 
 
-def format_latency_report(report: dict[str, Any]) -> str:
+def format_latency_report(report: LatencyReport) -> str:
     lines = [
         "Jimmy latency",
         f"- events: {report['event_count']}",
@@ -203,7 +326,7 @@ def format_latency_report(report: dict[str, Any]) -> str:
 # --- usage ---
 
 
-def build_usage_report(events: list[MCPEvent], *, integration: str | None = None) -> dict[str, Any]:
+def build_usage_report(events: list[MCPEvent], *, integration: str | None = None) -> UsageReport:
     tool_counts = Counter(event.tool_name for event in events)
     actor_counts = Counter(event.actor for event in events)
     integration_counts = Counter(event.integration_category for event in events)
@@ -219,7 +342,7 @@ def build_usage_report(events: list[MCPEvent], *, integration: str | None = None
     }
 
 
-def format_usage_report(report: dict[str, Any]) -> str:
+def format_usage_report(report: UsageReport) -> str:
     lines = [
         "Jimmy usage",
         f"- events: {report['event_count']}",
@@ -250,7 +373,7 @@ def format_usage_report(report: dict[str, Any]) -> str:
 # --- reliability ---
 
 
-def build_reliability_report(events: list[MCPEvent], *, integration: str | None = None) -> dict[str, Any]:
+def build_reliability_report(events: list[MCPEvent], *, integration: str | None = None) -> ReliabilityReport:
     tool_buckets: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "success": 0, "failure": 0})
     error_by_tool: dict[str, Counter[str]] = defaultdict(Counter)
     for event in events:
@@ -262,7 +385,7 @@ def build_reliability_report(events: list[MCPEvent], *, integration: str | None 
             bucket["failure"] += 1
             error_by_tool[event.tool_name][event.error_code or "unknown"] += 1
 
-    tool_reliability: dict[str, dict[str, Any]] = {}
+    tool_reliability: dict[str, ToolReliabilityEntry] = {}
     for tool_name, counts in tool_buckets.items():
         rate = (counts["success"] / counts["total"] * 100) if counts["total"] else 0.0
         tool_reliability[tool_name] = {
@@ -286,7 +409,7 @@ def build_reliability_report(events: list[MCPEvent], *, integration: str | None 
     }
 
 
-def format_reliability_report(report: dict[str, Any]) -> str:
+def format_reliability_report(report: ReliabilityReport) -> str:
     lines = [
         "Jimmy reliability",
         f"- events: {report['event_count']}",
@@ -308,7 +431,7 @@ def format_reliability_report(report: dict[str, Any]) -> str:
 # --- session ---
 
 
-def build_session_report(events: list[MCPEvent], *, session_id: str) -> dict[str, Any]:
+def build_session_report(events: list[MCPEvent], *, session_id: str) -> SessionReport:
     sorted_events = sorted(events, key=lambda e: e.timestamp)
     total_duration = sum(e.duration_ms for e in sorted_events)
     success_count = sum(1 for e in sorted_events if e.success)
@@ -332,7 +455,7 @@ def build_session_report(events: list[MCPEvent], *, session_id: str) -> dict[str
     }
 
 
-def format_session_report(report: dict[str, Any]) -> str:
+def format_session_report(report: SessionReport) -> str:
     lines = [
         "Jimmy session",
         f"- session_id: {report['session_id']}",
@@ -372,8 +495,8 @@ def build_anomalies_report(
     baseline_days: int,
     threshold: float,
     integration: str | None = None,
-) -> dict[str, Any]:
-    def _rates(events: list[MCPEvent], days: int) -> dict[str, Any]:
+) -> AnomaliesReport:
+    def _rates(events: list[MCPEvent], days: int) -> WindowStats:
         total = len(events)
         failures = sum(1 for e in events if not e.success)
         failure_rate = round(failures / total * 100, 1) if total else 0.0
@@ -393,7 +516,7 @@ def build_anomalies_report(
     current = _rates(current_events, current_days)
     baseline = _rates(baseline_events, baseline_days)
 
-    alerts: list[dict[str, Any]] = []
+    alerts: list[AnomalyAlert] = []
 
     # Failure rate spike
     if baseline["failure_rate"] > 0 and current["failure_rate"] > 0:
@@ -474,7 +597,7 @@ def build_anomalies_report(
     }
 
 
-def format_anomalies_report(report: dict[str, Any]) -> str:
+def format_anomalies_report(report: AnomaliesReport) -> str:
     current = report["current_window"]
     baseline = report["baseline_window"]
     lines = [
@@ -499,7 +622,7 @@ def format_anomalies_report(report: dict[str, Any]) -> str:
 # --- trace ---
 
 
-def build_trace_report(event: MCPEvent) -> dict[str, Any]:
+def build_trace_report(event: MCPEvent) -> TraceReport:
     return {
         "request_id": event.request_id,
         "timestamp": event.timestamp,
@@ -516,9 +639,7 @@ def build_trace_report(event: MCPEvent) -> dict[str, Any]:
     }
 
 
-def format_trace_report(report: dict[str, Any]) -> str:
-    import json
-
+def format_trace_report(report: TraceReport) -> str:
     payload_json = json.dumps(report["payload_summary"], indent=2, sort_keys=True)
     lines = [
         "Jimmy trace",

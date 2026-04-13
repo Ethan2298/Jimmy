@@ -5,11 +5,22 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Any
+from typing import Any, TypedDict
 
 import httpx
 
 _SENTINEL = object()
+
+
+class InspectReport(TypedDict):
+    mode: str
+    tool_count: int
+    read_count: int
+    write_count: int
+    categories: dict[str, list[dict[str, Any]]]
+    tools: list[dict[str, Any]]
+    show_schema: bool
+    tool_filter: str | None
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,25 +30,22 @@ _READ_PREFIXES = ("search_", "get_", "list_")
 _READ_EXACT = frozenset(("kb_list", "kb_read", "kb_search", "memory_read", "memory_search", "memory_list"))
 
 
-async def _load_local_tools() -> list[dict[str, Any]]:
+async def load_local_tools() -> list[dict[str, Any]]:
     import importlib
-    ghl_api_key = os.environ.get("GHL_API_KEY")
-    ghl_location_id = os.environ.get("GHL_LOCATION_ID")
-    os.environ.setdefault("GHL_API_KEY", "__inspect__")
-    os.environ.setdefault("GHL_LOCATION_ID", "__inspect__")
-    try:
+    from unittest.mock import patch
+    env_overrides = {}
+    if not os.environ.get("GHL_API_KEY"):
+        env_overrides["GHL_API_KEY"] = "__inspect__"
+    if not os.environ.get("GHL_LOCATION_ID"):
+        env_overrides["GHL_LOCATION_ID"] = "__inspect__"
+    with patch.dict(os.environ, env_overrides):
         module = importlib.import_module("mcp_servers.ghl.server")
         mcp_app = getattr(module, "mcp")
         tools = await mcp_app.list_tools()
-    finally:
-        if ghl_api_key is None:
-            os.environ.pop("GHL_API_KEY", None)
-        if ghl_location_id is None:
-            os.environ.pop("GHL_LOCATION_ID", None)
-    return [_tool_to_dict(tool) for tool in tools]
+    return [tool_to_dict(tool) for tool in tools]
 
 
-async def _load_remote_tools(url: str, auth_token: str) -> list[dict[str, Any]]:
+async def load_remote_tools(url: str, auth_token: str) -> list[dict[str, Any]]:
     from mcp.client.streamable_http import streamable_http_client
     from mcp.client.session import ClientSession
 
@@ -46,10 +54,10 @@ async def _load_remote_tools(url: str, auth_token: str) -> list[dict[str, Any]]:
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 result = await session.list_tools()
-                return [_tool_to_dict(tool) for tool in result.tools]
+                return [tool_to_dict(tool) for tool in result.tools]
 
 
-def _tool_to_dict(tool: Any) -> dict[str, Any]:
+def tool_to_dict(tool: Any) -> dict[str, Any]:
     schema = tool.inputSchema or {}
     props = schema.get("properties", {})
     required = set(schema.get("required", []))
@@ -83,19 +91,8 @@ def _is_read_tool(name: str) -> bool:
     return name.startswith(_READ_PREFIXES) or name in _READ_EXACT
 
 
-def _categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Categorize tools by naming convention: prefix before first underscore."""
-    # Well-known prefix groups for clean display names
-    _DISPLAY_NAMES: dict[str, str] = {
-        "search": "contacts",
-        "get": "contacts",
-        "create": "contacts",
-        "update": "contacts",
-        "delete": "contacts",
-        "add": "contacts",
-        "remove": "contacts",
-    }
-    # Override: explicit category rules by tool name prefix
     _CATEGORY_RULES: list[tuple[tuple[str, ...], str]] = [
         (("search_contacts", "get_contact", "create_or_update_contact", "update_contact", "delete_contact", "add_contact_tags", "remove_contact_tags"), "contacts"),
         (("search_conversations", "get_conversation_messages", "send_message", "update_conversation"), "conversations"),
@@ -132,10 +129,10 @@ def _categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, A
     return categorized
 
 
-def build_inspect_report(tools: list[dict[str, Any]], *, mode: str, show_schema: bool, tool_filter: str | None = None) -> dict[str, Any]:
+def build_inspect_report(tools: list[dict[str, Any]], *, mode: str, show_schema: bool, tool_filter: str | None = None) -> InspectReport:
     if tool_filter:
         tools = [t for t in tools if tool_filter.lower() in t["name"].lower()]
-    categories = _categorize_tools(tools)
+    categories = categorize_tools(tools)
     read_tools = [t for t in tools if _is_read_tool(t["name"])]
     write_tools = [t for t in tools if not _is_read_tool(t["name"])]
     return {
@@ -150,7 +147,7 @@ def build_inspect_report(tools: list[dict[str, Any]], *, mode: str, show_schema:
     }
 
 
-def format_inspect_report(report: dict[str, Any]) -> str:
+def format_inspect_report(report: InspectReport) -> str:
     lines = [
         "Jimmy inspect",
         f"- mode: {report['mode']}",
@@ -199,6 +196,8 @@ def build_inspector_command(
         cmd = [npx, "@modelcontextprotocol/inspector", "--method", "streamableHttp"]
         env["MCP_SERVER_URL"] = remote_url
         if token:
+            # Security note: MCP Inspector reads headers from env vars only.
+            # This is visible in /proc/<pid>/environ on Linux.
             env["MCP_HEADERS"] = json.dumps({"Authorization": f"Bearer {token}"})
     else:
         cmd = [npx, "@modelcontextprotocol/inspector", sys.executable, "-m", "mcp_servers.ghl.server"]
