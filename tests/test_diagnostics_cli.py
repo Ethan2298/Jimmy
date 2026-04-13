@@ -37,7 +37,7 @@ from diagnostics.reports import (
     format_status_report,
     format_trace_report,
     format_usage_report,
-    _percentile,
+    percentile,
 )
 from diagnostics.health import HealthCheckResult
 from diagnostics.inspect import (
@@ -45,8 +45,8 @@ from diagnostics.inspect import (
     build_inspector_command,
     format_inspect_report,
     format_inspector_launch,
-    _tool_to_dict,
-    _categorize_tools,
+    tool_to_dict,
+    categorize_tools,
 )
 from diagnostics.telemetry import MCPEvent, MemoryEventStore
 
@@ -641,7 +641,7 @@ def test_anomalies_command_via_run_command():
 
 
 def _make_fake_tool(name, description="A tool", params=None):
-    """Build a tool dict matching _tool_to_dict output."""
+    """Build a tool dict matching tool_to_dict output."""
     params = params or []
     return {
         "name": name,
@@ -730,7 +730,7 @@ def test_inspect_format_shows_schema_details():
 def test_inspect_categorize_puts_unknown_in_other():
     tools = [_make_fake_tool("custom_widget")]
 
-    categories = _categorize_tools(tools)
+    categories = categorize_tools(tools)
 
     assert "other" in categories
     assert categories["other"][0]["name"] == "custom_widget"
@@ -749,7 +749,7 @@ def test_tool_to_dict_parses_mcp_tool():
             "type": "object",
         }
 
-    result = _tool_to_dict(FakeTool())
+    result = tool_to_dict(FakeTool())
 
     assert result["name"] == "search_contacts"
     assert result["description"] == "Search contacts."
@@ -775,7 +775,7 @@ def test_inspect_command_local_via_run_command(monkeypatch):
     async def fake_load_local():
         return fake_tools
 
-    monkeypatch.setattr(cli_module, "_load_local_tools", fake_load_local)
+    monkeypatch.setattr(cli_module, "load_local_tools", fake_load_local)
 
 
     output = asyncio.run(
@@ -1035,21 +1035,21 @@ def test_session_integrations_sorted_deterministically():
 
 
 def test_percentile_empty_list():
-    assert _percentile([], 0.95) == 0
+    assert percentile([], 0.95) == 0
 
 
 def test_percentile_single_value():
-    assert _percentile([42], 0.95) == 42
+    assert percentile([42], 0.95) == 42
 
 
 def test_percentile_two_values():
-    assert _percentile([10, 200], 0.95) == 190
+    assert percentile([10, 200], 0.95) == 190
 
 
 def test_percentile_hundred_values():
     values = list(range(1, 101))  # 1..100
-    assert _percentile(values, 0.95) == 95
-    assert _percentile(values, 0.50) == 50
+    assert percentile(values, 0.95) == 95
+    assert percentile(values, 0.50) == 50
 
 
 # --- MCPEvent.from_row with corrupt/missing data ---

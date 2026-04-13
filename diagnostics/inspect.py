@@ -30,7 +30,7 @@ _READ_PREFIXES = ("search_", "get_", "list_")
 _READ_EXACT = frozenset(("kb_list", "kb_read", "kb_search", "memory_read", "memory_search", "memory_list"))
 
 
-async def _load_local_tools() -> list[dict[str, Any]]:
+async def load_local_tools() -> list[dict[str, Any]]:
     import importlib
     from unittest.mock import patch
     env_overrides = {}
@@ -42,10 +42,10 @@ async def _load_local_tools() -> list[dict[str, Any]]:
         module = importlib.import_module("mcp_servers.ghl.server")
         mcp_app = getattr(module, "mcp")
         tools = await mcp_app.list_tools()
-    return [_tool_to_dict(tool) for tool in tools]
+    return [tool_to_dict(tool) for tool in tools]
 
 
-async def _load_remote_tools(url: str, auth_token: str) -> list[dict[str, Any]]:
+async def load_remote_tools(url: str, auth_token: str) -> list[dict[str, Any]]:
     from mcp.client.streamable_http import streamable_http_client
     from mcp.client.session import ClientSession
 
@@ -54,10 +54,10 @@ async def _load_remote_tools(url: str, auth_token: str) -> list[dict[str, Any]]:
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             result = await session.list_tools()
-            return [_tool_to_dict(tool) for tool in result.tools]
+            return [tool_to_dict(tool) for tool in result.tools]
 
 
-def _tool_to_dict(tool: Any) -> dict[str, Any]:
+def tool_to_dict(tool: Any) -> dict[str, Any]:
     schema = tool.inputSchema or {}
     props = schema.get("properties", {})
     required = set(schema.get("required", []))
@@ -91,7 +91,7 @@ def _is_read_tool(name: str) -> bool:
     return name.startswith(_READ_PREFIXES) or name in _READ_EXACT
 
 
-def _categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Categorize tools by naming convention: prefix before first underscore."""
     _CATEGORY_RULES: list[tuple[tuple[str, ...], str]] = [
         (("search_contacts", "get_contact", "create_or_update_contact", "update_contact", "delete_contact", "add_contact_tags", "remove_contact_tags"), "contacts"),
@@ -132,7 +132,7 @@ def _categorize_tools(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, A
 def build_inspect_report(tools: list[dict[str, Any]], *, mode: str, show_schema: bool, tool_filter: str | None = None) -> InspectReport:
     if tool_filter:
         tools = [t for t in tools if tool_filter.lower() in t["name"].lower()]
-    categories = _categorize_tools(tools)
+    categories = categorize_tools(tools)
     read_tools = [t for t in tools if _is_read_tool(t["name"])]
     write_tools = [t for t in tools if not _is_read_tool(t["name"])]
     return {

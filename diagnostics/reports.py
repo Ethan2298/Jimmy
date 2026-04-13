@@ -134,7 +134,7 @@ def _format_dt(value: datetime | None) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
 
 
-def _percentile(values: list[int], pct: float) -> int:
+def percentile(values: list[int], pct: float) -> int:
     if not values:
         return 0
     ordered = sorted(values)
@@ -162,7 +162,7 @@ def _tool_stats(events: list[MCPEvent]) -> dict[str, LatencyStats]:
         stats[tool_name] = {
             "count": len(durations),
             "avg_ms": int(round(mean(durations))) if durations else 0,
-            "p95_ms": _percentile(durations, 0.95),
+            "p95_ms": percentile(durations, 0.95),
             "max_ms": max(durations) if durations else 0,
         }
     return dict(sorted(stats.items(), key=lambda item: (-item[1]["count"], item[0])))
@@ -178,7 +178,7 @@ def _integration_stats(events: list[MCPEvent]) -> dict[str, LatencyStats]:
         stats[category] = {
             "count": len(durations),
             "avg_ms": int(round(mean(durations))) if durations else 0,
-            "p95_ms": _percentile(durations, 0.95),
+            "p95_ms": percentile(durations, 0.95),
             "max_ms": max(durations) if durations else 0,
         }
     return dict(sorted(stats.items(), key=lambda item: (-item[1]["count"], item[0])))
@@ -201,7 +201,7 @@ def build_status_report(events: list[MCPEvent], *, store_configured: bool, windo
         "event_count": len(events),
         "failure_count": len(failures),
         "last_event_at": last_event_at,
-        "p95_ms": _percentile(latency_values, 0.95),
+        "p95_ms": percentile(latency_values, 0.95),
         "top_tool": _top_rows(tool_counts, 1)[0] if tool_counts else None,
         "top_actor": _top_rows(actor_counts, 1)[0] if actor_counts else None,
         "top_integration": _top_rows(integration_counts, 1)[0] if integration_counts else None,
@@ -291,7 +291,7 @@ def build_latency_report(events: list[MCPEvent], *, integration: str | None = No
         "tool_stats": stats,
         "integration_stats": integration_stats,
         "overall_avg_ms": int(round(mean([event.duration_ms for event in events]))) if events else 0,
-        "overall_p95_ms": _percentile([event.duration_ms for event in events], 0.95),
+        "overall_p95_ms": percentile([event.duration_ms for event in events], 0.95),
     }
 
 

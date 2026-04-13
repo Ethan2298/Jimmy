@@ -12,7 +12,8 @@ from diagnostics.telemetry import (
     MCPEvent,
     MCPEventQuery,
     MCPEventStore,
-    _to_iso_z,
+    SupabaseEventStore,
+    to_iso_z,
     create_event_store_from_env,
 )
 from diagnostics.reports import (
@@ -44,10 +45,10 @@ from diagnostics.health import (
     format_health_report,
 )
 from diagnostics.inspect import (
-    _load_local_tools,
-    _load_remote_tools,
-    _tool_to_dict,
-    _categorize_tools,
+    load_local_tools,
+    load_remote_tools,
+    tool_to_dict,
+    categorize_tools,
     build_inspect_report,
     format_inspect_report,
     build_inspector_command,
@@ -92,7 +93,7 @@ async def _load_events(
 
 def _json_default(obj: Any) -> Any:
     if isinstance(obj, datetime):
-        return _to_iso_z(obj)
+        return to_iso_z(obj)
     if isinstance(obj, MCPEvent):
         return obj.to_row()
     if isinstance(obj, Counter):
@@ -171,6 +172,14 @@ def _format_or_json(report: dict[str, Any], formatter, *, use_json: bool) -> str
 
 async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None = None) -> str:
     resolved_store = store or create_event_store_from_env()
+    try:
+        return await _run_command_inner(args, resolved_store=resolved_store)
+    finally:
+        if isinstance(resolved_store, SupabaseEventStore):
+            await resolved_store.close()
+
+
+async def _run_command_inner(args: argparse.Namespace, *, resolved_store: MCPEventStore) -> str:
     store_configured = getattr(resolved_store, "enabled", True)
     use_json = getattr(args, "json", False)
 
@@ -179,10 +188,10 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
             token = args.token or os.getenv("MCP_AUTH_TOKEN", "").strip()
             if not token:
                 raise RuntimeError("Auth token required for remote inspect. Use --token or set MCP_AUTH_TOKEN.")
-            tools = await _load_remote_tools(args.remote, token)
+            tools = await load_remote_tools(args.remote, token)
             mode = f"remote ({args.remote})"
         else:
-            tools = await _load_local_tools()
+            tools = await load_local_tools()
             mode = "local"
         report = build_inspect_report(tools, mode=mode, show_schema=args.schema, tool_filter=args.tool)
         return _format_or_json(report, format_inspect_report, use_json=use_json)
@@ -194,8 +203,12 @@ async def run_command(args: argparse.Namespace, *, store: MCPEventStore | None =
             await check_supabase_schema(resolved_store),
             await check_ghl_probe(),
         ]
-        output = format_health_report(results)
-        if not all(result.healthy for result in results):
+        if use_json:
+            report = [{"name": r.name, "healthy": r.healthy, "detail": r.detail} for r in results]
+            output = json.dumps({"checks": report, "healthy": all(r.healthy for r in results)}, indent=2)
+        else:
+            output = format_health_report(results)
+        if not all(r.healthy for r in results):
             raise CLICommandError(output)
         return output
 

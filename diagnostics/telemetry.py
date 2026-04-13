@@ -46,7 +46,7 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _to_iso_z(value: datetime) -> str:
+def to_iso_z(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
@@ -154,7 +154,7 @@ class MCPEvent:
     def to_row(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
-            "occurred_at": _to_iso_z(self.timestamp),
+            "occurred_at": to_iso_z(self.timestamp),
             "actor": self.actor,
             "session_id": self.session_id,
             "integration_category": self.integration_category,
@@ -169,7 +169,7 @@ class MCPEvent:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "MCPEvent":
-        occurred_at = row.get("occurred_at") or row.get("timestamp") or _to_iso_z(_utc_now())
+        occurred_at = row.get("occurred_at") or row.get("timestamp") or to_iso_z(_utc_now())
         timestamp = _parse_iso_z(str(occurred_at))
         payload_summary = row.get("payload_summary") or {}
         if isinstance(payload_summary, str):
@@ -307,12 +307,10 @@ class SupabaseEventStore:
             params.append(("request_id", f"eq.{query.request_id}"))
         if query.session_id:
             params.append(("session_id", f"eq.{query.session_id}"))
-        if query.since is not None and query.until is not None:
-            params.append(("occurred_at", f"and(gte.{_to_iso_z(query.since)},lte.{_to_iso_z(query.until)})"))
-        elif query.since is not None:
-            params.append(("occurred_at", f"gte.{_to_iso_z(query.since)}"))
-        elif query.until is not None:
-            params.append(("occurred_at", f"lte.{_to_iso_z(query.until)}"))
+        if query.since is not None:
+            params.append(("occurred_at", f"gte.{to_iso_z(query.since)}"))
+        if query.until is not None:
+            params.append(("occurred_at", f"lte.{to_iso_z(query.until)}"))
         if query.actor:
             params.append(("actor", f"eq.{query.actor}"))
         if query.integration_category:
@@ -423,6 +421,10 @@ class InstrumentedFastMCP:
 
     async def list_tools(self) -> Any:
         return await self._app.list_tools()
+
+    def __getattr__(self, name: str) -> Any:
+        """Fallback for any FastMCP attribute not explicitly delegated."""
+        return getattr(self._app, name)
 
     def tool(self, *decorator_args: Any, **decorator_kwargs: Any):
         register = self._app.tool(*decorator_args, **decorator_kwargs)
