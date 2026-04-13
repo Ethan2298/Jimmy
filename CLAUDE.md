@@ -88,6 +88,46 @@ Separate Electron desktop app (electron-vite, React 19, Tailwind v4). Has its ow
 - npm as package manager
 - GHL is the single source of truth for dealership data — no shadow databases
 
+## Workflow
+
+Solo dev, AI-native. GitHub Issues is the task tracker. Notion is the wiki.
+
+### Issue flow
+
+Backlog → Building → Review → Ship → Done
+
+- **Backlog**: Prioritized GitHub Issues (P0–P3 labels). Pick from the top.
+- **Building**: Branch created, code in progress. One issue at a time.
+- **Review**: PR open, verify it works. Fast — not a multi-day cycle.
+- **Ship**: Merged to main, deployed to Vercel, verified in prod.
+- **Done**: Issue closed.
+
+### Labels
+
+- Priority: `P0-critical`, `P1-high`, `P2-normal`, `P3-low`
+- Area: `area:ghl-mcp`, `area:frontend`, `area:backend`, `area:infra`, `area:ai-engine`, `area:product`
+- Type: `bug`, `enhancement`, `task`
+
+### Session start
+
+When Ethan says "what should I work on" or `/next`:
+1. Check open GitHub Issues, sorted by priority
+2. Recommend the highest-priority unassigned issue
+3. When picked, create a branch and start building
+
+### Ship cycle
+
+1. Build on a feature branch
+2. Open PR with summary + test plan
+3. Merge to main
+4. Verify on Vercel prod
+5. Close the GitHub issue
+
+### Where things live
+
+- **GitHub Issues** — all tasks, bugs, features (source of truth for work)
+- **Notion** — architecture docs, product vision, design sessions, research (thinking space, not task tracking)
+
 ## Environment Variables
 
 See `.env.example`. Required:
