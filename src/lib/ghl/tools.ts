@@ -193,6 +193,8 @@ const conversationsInput = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("get_messages"),
     conversation_id: z.string().describe("The GHL conversation ID."),
+    last_message_id: z.string().default("").describe("Cursor for pagination. Pass the lastMessageId from a previous response to fetch the next page."),
+    limit: z.number().min(1).max(100).default(20).describe("Messages per page (1-100)."),
   }),
   z.object({
     action: z.literal("update"),
@@ -525,10 +527,18 @@ export function registerTools(server: McpServer): void {
             return ok({ conversations, total, has_more: total > conversations.length });
           }
           case "get_messages": {
-            const data = await client().get(`/conversations/${input.conversation_id}/messages`);
-            const rawMessages =
-              ((data.messages as Record<string, unknown>)?.messages as Record<string, unknown>[]) || [];
+            const params: Record<string, string> = {};
+            if (input.last_message_id) params.lastMessageId = input.last_message_id;
+            params.limit = String(input.limit);
+            const data = await client().get(
+              `/conversations/${input.conversation_id}/messages`,
+              Object.keys(params).length ? params : undefined,
+            );
+            const messagesObj = data.messages as Record<string, unknown>;
+            const rawMessages = (messagesObj?.messages as Record<string, unknown>[]) || [];
+            const lastId = messagesObj?.lastMessageId as string | undefined;
             const messages = [...rawMessages].reverse().map((m) => ({
+              id: m.id,
               direction: m.direction || "unknown",
               body: ((m.body as string) || "").slice(0, 500),
               messageType: m.messageType,
@@ -539,8 +549,10 @@ export function registerTools(server: McpServer): void {
               status: m.status,
               attachments: m.attachments || [],
             }));
-            const hasMore = ((data.messages as Record<string, unknown>)?.nextPage as boolean) || false;
-            return ok({ messages, count: messages.length, has_more: hasMore });
+            const hasMore = (messagesObj?.nextPage as boolean) || false;
+            const result: Record<string, unknown> = { messages, count: messages.length, has_more: hasMore };
+            if (lastId) result.lastMessageId = lastId;
+            return ok(result);
           }
           case "update": {
             const body: Record<string, unknown> = {};
