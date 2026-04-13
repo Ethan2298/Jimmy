@@ -1,75 +1,129 @@
 ---
-description: Live MCP testing session - inspect the current project surface, starting with the GHL integration
+description: Test the local MCP server against the current branch — spin up dev, hit localhost, verify tools work
 ---
 
-# Test Current Project - Live MCP Inspection
+# Local MCP Test
 
-You are entering a live testing session for the current MCP project.
+Spin up the local Next.js dev server and test the MCP endpoint at `localhost:3000/api/mcp` against the current branch code. This is how you verify MCP changes before deploying to prod.
 
-GHL is the active integration category right now. Treat it as one tool group inside the broader project, not the whole product.
+## Step 1: Start the dev server
 
-## What this is
+Check if port 3000 is already in use. If not, start `npm run dev` in the background.
 
-A hands-on session where you directly call the MCP tools registered on the live server and inspect the results. Think of it like a powerglove - you manipulate the MCP, poke at every tool, and verify things work before pushing to prod.
+```bash
+# Check if dev server is already running
+lsof -ti:3000 || npm run dev &
+```
 
-## How to run the session
+Wait for the server to be ready (poll `http://localhost:3000` until it responds, max 30 seconds).
 
-### Step 1: Health Check
-Start with the admin CLI before touching tools:
-- Run `python -m mcp_servers.ghl.cli health`
-- Run `python -m mcp_servers.ghl.cli status --integration GHL`
-- If `health` fails, stop and diagnose env, Supabase, schema, or GHL auth before tool testing
+## Step 2: Verify MCP endpoint is reachable
 
-### Step 2: Live Read Check
-Call a lightweight read-only tool to confirm the MCP server is reachable and authenticated:
-- Call `mcp__ghl__get_location` - this should return Mikalyzed Auto Boutique's location data
-- If this fails, compare the runtime result against `mcp health` and `mcp failures --integration GHL`
+Send an MCP `initialize` request to confirm the endpoint is up and authenticated:
 
-### Step 3: Tool Inventory
-List what's available:
-- Report the total number of project MCP tools currently registered
-- List them grouped by category (contacts, conversations, pipelines, calendars, tasks, notes, users, knowledge base)
-- If anything looks like it belongs to a future integration, call that out separately instead of lumping it into GHL
-- Flag any tools that look broken, duplicated, or missing descriptions
+```bash
+curl -s -X POST http://localhost:3000/api/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-03-26",
+      "capabilities": {},
+      "clientInfo": { "name": "mcp-test", "version": "1.0.0" }
+    }
+  }'
+```
 
-### Step 4: Targeted Testing
-Based on what Ethan asks, or if no specific request, run through these core workflows against the current GHL category:
+If this returns a 401, check that `MCP_AUTH_TOKEN` is set in `.env.local`. If it errors, check the dev server logs.
+
+## Step 3: List registered tools
+
+Send a `tools/list` request to get the full tool inventory:
+
+```bash
+curl -s -X POST http://localhost:3000/api/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+    "params": {}
+  }'
+```
+
+Report:
+- Total number of tools registered
+- List them grouped by category (contacts, conversations, pipelines, calendars, appointments, location, users, etc.)
+- Flag any tools with missing descriptions, broken schemas, or unexpected names
+- Compare against what's expected for the current branch (e.g., if testing the consolidation PR, expect 11 tools not 32)
+
+## Step 4: Call tools via MCP protocol
+
+Use `tools/call` to exercise the tools directly. The format is:
+
+```bash
+curl -s -X POST http://localhost:3000/api/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $MCP_AUTH_TOKEN" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "TOOL_NAME_HERE",
+      "arguments": {}
+    }
+  }'
+```
+
+Run through these core read-only workflows:
+
+**Location & Config:**
+- Get location details (or `location_info` action `details` if consolidated)
+- Get location tags
+- Get users
 
 **Contacts:**
-- `search_contacts` with a real query
-- `get_contact` on a result
-- Verify the response shape is clean and useful
+- Search contacts (empty query, limit 5)
+- Get a specific contact from the results
 
-**Pipeline:**
-- `get_pipelines` to see pipeline structure
-- `search_opportunities` to pull live deals
-- Verify monetary values, stages, and contact links resolve
+**Pipeline & Opportunities:**
+- Get pipelines
+- Search opportunities (open, limit 5)
+- Get a specific opportunity from the results
 
 **Conversations:**
-- `search_conversations` to find recent threads
-- `get_conversation_messages` on one
-- Verify message history is readable
+- Search conversations (limit 5)
+- Get messages from one conversation
 
 **Calendar:**
-- `list_calendars` and `get_calendar_events` for upcoming
-- Verify dates and appointment details
+- List calendars
+- Get calendar events (if calendar scope is enabled)
 
-**Knowledge Base:**
-- `kb_list` and `kb_search` if populated
+For each call, verify:
+- The response is valid JSON-RPC
+- The `content` array has a `text` field with parseable JSON
+- The data shape matches what the tool description promises
+- Error responses include useful messages (not raw stack traces)
 
-### Step 5: Report
-After testing, give a clear summary:
-- What worked
-- What broke or returned unexpected data
-- What's missing or could be better
-- Any tools returning 403s (scope not enabled yet - just note it, don't nag)
-- Any request IDs worth tracing with `python -m mcp_servers.ghl.cli trace <request_id> --integration GHL`
-- Which findings are specific to the current GHL integration versus the broader MCP project
+## Step 5: Report
+
+Give a clear summary:
+- Server status (did it start, is the endpoint authenticated)
+- Tool count and whether it matches expectations for this branch
+- What worked — show actual data snippets, not just "it worked"
+- What broke — include the full error response
+- What's a code bug vs. a GHL scope/config issue
+- Any regressions compared to the prod tool surface
 
 ## Rules
 - Only use **read-only** tools unless Ethan explicitly says to test writes
 - Never modify real contact/deal/conversation data without explicit permission
-- If a tool returns a 403 scope error, log it once and move on
-- Keep responses tight - show the actual data, not just "it worked"
-- If Ethan says "test [specific thing]" - focus there, skip the rest
-- GHL is the current category; do not assume it is the only category the project will ever support
+- If a tool returns a scope error (401/403), log it once and move on
+- Keep responses tight — show the actual data
+- If Ethan says "test [specific thing]" — focus there, skip the rest
+- Do NOT leave the dev server running when done — kill it if you started it
