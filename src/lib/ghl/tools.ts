@@ -323,7 +323,7 @@ export function registerTools(server: McpServer): void {
               limit: String(normalizeLimit(input.limit)),
             };
             if (input.query) params.query = input.query;
-            if (input.tag) params.query = input.tag;
+            if (input.tag) params.tag = input.tag;
 
             const data = await client().get("/contacts/", params);
             const contacts = ((data.contacts as Record<string, unknown>[]) || []).map((c) => ({
@@ -632,10 +632,10 @@ export function registerTools(server: McpServer): void {
           case "search": {
             validateOpportunityStatus(input.status, true);
             const params: Record<string, string> = { limit: String(normalizeLimit(input.limit)) };
-            if (input.pipeline_id) params.pipelineId = input.pipeline_id;
-            if (input.stage_id) params.pipelineStageId = input.stage_id;
+            if (input.pipeline_id) params.pipeline_id = input.pipeline_id;
+            if (input.stage_id) params.pipeline_stage_id = input.stage_id;
             if (input.status) params.status = input.status;
-            if (input.contact_id) params.contactId = input.contact_id;
+            if (input.contact_id) params.contact_id = input.contact_id;
 
             const data = await client().get("/opportunities/search", params);
             const opportunities = ((data.opportunities as Record<string, unknown>[]) || []).map(
