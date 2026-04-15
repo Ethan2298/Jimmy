@@ -39,6 +39,8 @@ class GHLClient:
 
     def _needs_location(self, path: str) -> bool:
         """Return False for sub-resource paths that reject locationId."""
+        if path.startswith(f"/locations/{self.location_id}"):
+            return False
         for pattern in self.NO_LOCATION_PATTERNS:
             if path.endswith(pattern):
                 return False

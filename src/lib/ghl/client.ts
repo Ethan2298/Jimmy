@@ -41,6 +41,7 @@ class GHLClient {
   private static NO_LOCATION_PATTERNS = ["/notes", "/tasks", "/messages", "/free-slots"];
 
   private needsLocation(path: string): boolean {
+    if (path.startsWith(`/locations/${this.locationId}`)) return false;
     for (const pattern of GHLClient.NO_LOCATION_PATTERNS) {
       if (path.endsWith(pattern)) return false;
     }
