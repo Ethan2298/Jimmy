@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+.env.prod
+.env.vercel
 
 # Python
 __pycache__/
@@ -74,3 +76,8 @@ next-env.d.ts
 
 # Extracted to its own repo
 magi/
+
+# Local tooling / untracked
+.playwright-mcp/
+api/
+
