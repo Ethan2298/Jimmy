@@ -77,6 +77,9 @@ next-env.d.ts
 # Extracted to its own repo
 magi/
 
+# Driveline Desktop (forked sst/opencode, tracked in its own inner git)
+driveline-desktop/
+
 # Local tooling / untracked
 .playwright-mcp/
 api/
