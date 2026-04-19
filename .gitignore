@@ -71,3 +71,6 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# Extracted to its own repo
+magi/
