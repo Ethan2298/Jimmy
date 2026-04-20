@@ -7,7 +7,9 @@
       "mcp__48280cb1-f647-43fb-9236-46986be182c2__kb_read",
       "WebFetch(domain:api.anthropic.com)",
       "Bash(git remote *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Read(//c/Users/ethan/Jimmy/driveline-desktop/**)",
+      "Read(//c/Users/ethan/Jimmy/**)"
     ]
   }
 }
